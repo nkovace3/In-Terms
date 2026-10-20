@@ -12,8 +12,8 @@ CATEGORIES = {
     "nfl": "NFL",
     "mlb": "MLB",
     "reality tv": "Reality TV",
-    "politics": "Politics",
-    "finance": "Finance",
+    "us politics": "US Politics",
+    "business": "Business",
 }
 
 @router.get("/articles", response_model=list[ArticleResponse])
