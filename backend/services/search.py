@@ -1,21 +1,25 @@
-from functools import lru_cache
+import httpx
 from config import get_settings
-from tavily import TavilyClient
 from schemas.search import Source, SearchResult
 
-@lru_cache
-def get_client() -> TavilyClient:
-    return TavilyClient(api_key = get_settings().tavily_api_key)
+TAVILY_SEARCH_URL = 'https://api.tavily.com/search'
 
 async def search_web(query: str) -> list[SearchResult]:
-    response = get_client().search(
-        query=query,
-        topic = 'news',
-        time_range = 'week',
-        max_results = 5,
-        include_answer = False,
-        include_raw_content = False
-    )
+    async with httpx.AsyncClient(timeout=30) as client:
+        response = await client.post(
+            TAVILY_SEARCH_URL,
+            headers={'Authorization': f'Bearer {get_settings().tavily_api_key}'},
+            json={
+                'query': query,
+                'topic': 'news',
+                'time_range': 'week',
+                'max_results': 5,
+                'include_answer': False,
+                'include_raw_content': False
+            }
+        )
+        response.raise_for_status()
+        data = response.json()
 
     return [
         SearchResult(
@@ -27,5 +31,5 @@ async def search_web(query: str) -> list[SearchResult]:
             score=result['score']
         )
 
-        for result in response['results']
+        for result in data['results']
     ]

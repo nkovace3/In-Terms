@@ -28,6 +28,12 @@ export const auth = betterAuth({
                 // sign-up color picker exists.
                 defaultValue: "oklch(0.64 0.26 322)",
             },
+            onboardingComplete: {
+                type: "boolean",
+                required: false,
+                input: true,
+                defaultValue: false,
+            },
         },
     },
 });

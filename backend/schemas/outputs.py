@@ -1,11 +1,14 @@
+from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field
 from schemas.search import Source
 from datetime import datetime
 
 class FinalStory(BaseModel):
-    headline: str
-    summary: str
-    key_points: list[str]
+    headline: str = Field(max_length=60)
+    summary: str = Field(max_length=110)
+    key_points: list[Annotated[str, Field(max_length=90)]] = Field(
+        min_length=3, max_length=5
+    )
     sources: list[Source]
 
 class ArticleResponse(BaseModel):
@@ -30,9 +33,11 @@ class StoryDynamics(BaseModel):
     emotional_dynamics: list[str] = []
 
 class InTermsResult(BaseModel):
-    headline: str
-    summary: str
-    key_points: list[str] = Field(min_length=3, max_length=3)
+    headline: str = Field(max_length=60)
+    summary: str = Field(max_length=110)
+    key_points: list[Annotated[str, Field(max_length=90)]] = Field(
+        min_length=3, max_length=3
+    )
 
 class InTermsResponse(BaseModel):
     id: int

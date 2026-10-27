@@ -6,17 +6,9 @@ import { Button } from "@/components/ui/button";
 import { FieldDescription, FieldLegend, FieldSet } from "@/components/ui/field";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { authClient } from "@/lib/auth-client";
+import { CATEGORIES as BASE_CATEGORIES } from "@/lib/categories";
 
-// Keep in sync with article-feed-view.tsx's category list.
-const CATEGORIES = [
-  "All",
-  "NBA",
-  "NFL",
-  "MLB",
-  "Reality TV",
-  "US Politics",
-  "Business",
-];
+const CATEGORIES = ["All", ...BASE_CATEGORIES];
 
 const DEFAULT_COLOR = "#c026d3";
 
@@ -29,9 +21,10 @@ export function OnboardingPreferences() {
     await authClient.updateUser({
       favoriteCategory: favoriteCategory[0],
       personalColor: personalColor,
+      onboardingComplete: true,
     });
 
-    router.push("/");
+    router.push("/?tour=welcome");
     router.refresh();
   }
 
@@ -100,6 +93,7 @@ export function OnboardingPreferences() {
 
       <Button
         type="button"
+        variant="outline"
         disabled={favoriteCategory.length === 0}
         className="w-full max-w-xs"
         onClick = {handleUserCustomization}

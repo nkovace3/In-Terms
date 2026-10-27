@@ -4,31 +4,27 @@ import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { ArticleCard } from "@/components/article-card";
 import { OverlayNav } from "@/components/overlay-nav";
+import { WelcomeTour } from "@/components/welcome-tour";
+import { CATEGORIES } from "@/lib/categories";
 import type { Article } from "@/lib/types";
 
-const CATEGORIES = ["NBA", "NFL", "MLB", "Reality TV", "US Politics", "Business"];
 const MENU_OPTIONS = ["All", ...CATEGORIES];
-
-function pickTranslationTarget(category: string, index: number): string {
-  for (let offset = 0; offset < CATEGORIES.length; offset++) {
-    const candidate = CATEGORIES[(index + offset) % CATEGORIES.length];
-    if (candidate.toLowerCase() !== category.toLowerCase()) return candidate;
-  }
-  return CATEGORIES[0];
-}
 
 export interface ArticleFeedViewProps {
   articles: Article[];
   initialCategory: string;
   personalAccent: string;
+  showTour?: boolean;
 }
 
 export function ArticleFeedView({
   articles,
   initialCategory,
   personalAccent,
+  showTour = false,
 }: ArticleFeedViewProps) {
   const [selectedCategory, setSelectedCategory] = useState(initialCategory);
+  const [tourActive, setTourActive] = useState(showTour);
 
   const visibleArticles =
     selectedCategory === "All"
@@ -59,11 +55,7 @@ export function ArticleFeedView({
             className="relative flex h-dvh w-full snap-center snap-always items-center justify-center px-6"
           >
             <div className="w-full max-w-md">
-              <ArticleCard
-                article={article}
-                translationTarget={pickTranslationTarget(article.category, i)}
-                personalAccent={personalAccent}
-              />
+              <ArticleCard article={article} personalAccent={personalAccent} />
             </div>
 
             {i === 0 && (
@@ -75,6 +67,12 @@ export function ArticleFeedView({
           </section>
         ))
       )}
+
+      {/* Rendered as a sibling here, not nested in OverlayNav or a card —
+          both of those have a transform/backdrop-filter ancestor, which
+          would break this tour's own position:fixed spotlight overlay the
+          same way it broke the dropdown backdrops earlier. */}
+      {tourActive && <WelcomeTour onFinish={() => setTourActive(false)} />}
     </div>
   );
 }

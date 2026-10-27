@@ -1,3 +1,5 @@
+import json
+
 from schemas.research import ResearchResult
 from schemas.outputs import FinalStory
 from services.google import execute_query
@@ -13,19 +15,25 @@ async def edit_story(research: ResearchResult) -> FinalStory:
         RESEARCH:
         {research}
 
+        This is a short-form card, not an article — every field below has a
+        hard character limit, so write tightly from the start rather than
+        composing a longer version and trimming it.
+
         Write:
 
         HEADLINE:
         A clear, interesting headline that tells the reader what the
-        story is about.
+        story is about. Maximum 60 characters.
 
         SUMMARY:
-        1-2 sentences that explain the story at a glance.
+        One sentence that explains the story at a glance.
         A reader should understand the basic situation from this alone.
+        Maximum 110 characters.
 
         KEY POINTS:
         3-5 short bullet points containing the most important facts.
-        Each point should be concise and easy to scan.
+        Each point should be concise and easy to scan. Maximum 90
+        characters each.
 
         SOURCES:
         Include only the sources that you actually used.
@@ -51,4 +59,9 @@ async def edit_story(research: ResearchResult) -> FinalStory:
         - Every factual claim must be supported by the provided research.
         """
     response = await execute_query(prompt, FinalStory)
-    return FinalStory.model_validate_json(response.text)
+    # model_construct, not model_validate_json: the schema's max_length
+    # constraints are sent to Gemini as real generation limits and usually
+    # keep output in budget, but it's not a 100% guarantee. Skipping
+    # re-validation here means an occasional few-characters-over response
+    # still comes through instead of hard-failing the whole request.
+    return FinalStory.model_construct(**json.loads(response.text))

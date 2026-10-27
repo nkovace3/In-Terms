@@ -1,3 +1,5 @@
+import json
+
 from services.google import execute_query
 from schemas.outputs import FinalStory, StoryDynamics, InTermsResult
 from models import Article
@@ -145,15 +147,18 @@ HOW TO WRITE THE OUTPUT:
 7. Avoid forced slang, memes, emojis, and gimmicks — the goal is a natural
    tonal shift, not a costume.
 
-OUTPUT FORMAT — return an InTermsResult:
+OUTPUT FORMAT — return an InTermsResult. This is a short-form card, not an
+article — every field has a hard character limit, so write tightly from the
+start rather than composing a longer version and trimming it:
 
 - headline: The real event, framed with {target_term}'s dramatic conventions.
-  No invented or relabeled entities.
-- summary: One or two sentences narrating the real event in that register,
-  including at least one specific, named {target_term} trope used as a
-  comparison.
+  No invented or relabeled entities. Maximum 60 characters.
+- summary: One sentence narrating the real event in that register, including
+  at least one specific, named {target_term} trope used as a comparison.
+  Maximum 110 characters.
 - key_points: Exactly three bullet points, each grounded in a real fact from
-  the ORIGINAL STORY, each framed through the same lens.
+  the ORIGINAL STORY, each framed through the same lens. Maximum 90
+  characters each.
 
 Before answering, check every sentence against the ORIGINAL STORY: if a
 name, event, or detail isn't there, remove it.
@@ -162,7 +167,9 @@ Return only the structured InTermsResult.
 """
 
     response = await execute_query(prompt, InTermsResult)
-    return InTermsResult.model_validate_json(response.text)
+    # model_construct, not model_validate_json — see the matching comment
+    # in services/editor.py for why.
+    return InTermsResult.model_construct(**json.loads(response.text))
 
 async def get_or_generate_in_terms(db: Session, article_id: int, target_category: str):
     cached = await get_in_terms(db=db, article_id=article_id, target_category=target_category)
@@ -188,18 +195,26 @@ async def get_or_generate_in_terms(db: Session, article_id: int, target_category
     similar_article = similar_articles[0] if similar_articles else None
 
     similar_dynamics = None
-    
-    if similar_article:
-        similar_dynamics = StoryDynamics(**similar_article.dynamics)
 
-    story = FinalStory(
+    if similar_article:
+        # Legacy articles predating dynamics extraction have dynamics=None —
+        # fall back to empty dynamics rather than crashing on **None.
+        similar_dynamics = StoryDynamics(**(similar_article.dynamics or {}))
+
+    # model_construct (not the normal constructor) deliberately skips
+    # validation here. This is already-persisted article content being
+    # repackaged for prompt context, not a fresh LLM result — it was
+    # validated once when it was first generated and saved, and older rows
+    # may predate FinalStory's current max_length limits.
+    story = FinalStory.model_construct(
                 headline=article.headline,
                 summary=article.summary,
                 key_points=article.key_points,
                 sources=[],
             )
 
-    dynamics = StoryDynamics(**article.dynamics)
+    # Same legacy-data fallback as similar_dynamics above.
+    dynamics = StoryDynamics(**(article.dynamics or {}))
 
     result = await generate_in_terms(
                 story=story,

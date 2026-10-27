@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, CircleUserRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +24,25 @@ export function OverlayNav({
   onSelectCategory,
 }: OverlayNavProps) {
   const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Click-outside-to-close via a document listener, not a fullscreen
+  // backdrop div: this header has backdrop-blur (a backdrop-filter), which
+  // makes it the containing block for position:fixed descendants — so a
+  // `fixed inset-0` backdrop here only ever covered the header's own
+  // ~64px strip, not the real viewport, and clicks below it fell through.
+  useEffect(() => {
+    if (!open) return;
+
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
 
   return (
     <header className="pointer-events-none fixed inset-x-0 top-0 z-30 flex items-center justify-between bg-gradient-to-b from-background/80 to-transparent px-6 py-4 backdrop-blur-md">
@@ -31,9 +50,10 @@ export function OverlayNav({
         In Terms
       </span>
 
-      <div className="pointer-events-auto relative">
+      <div ref={menuRef} className="pointer-events-auto relative">
         <button
           type="button"
+          data-tour="category-trigger"
           onClick={() => setOpen((value) => !value)}
           className="flex cursor-pointer items-center gap-1 rounded-full border border-border bg-background/80 px-3 py-1.5 text-xs font-medium text-foreground backdrop-blur-sm transition-colors hover:bg-muted"
         >
@@ -44,34 +64,26 @@ export function OverlayNav({
         </button>
 
         {open && (
-          <>
-            {/* Click-outside-to-close. Only exists while the menu is open,
-                so it doesn't reintroduce the scroll dead-zone bug. */}
-            <div
-              className="fixed inset-0 z-40"
-              onClick={() => setOpen(false)}
-            />
-            <div className="absolute top-full right-0 z-50 mt-2 w-40 overflow-hidden rounded-xl border border-border bg-popover py-1 shadow-lg">
-              {categories.map((category) => (
-                <button
-                  key={category}
-                  type="button"
-                  onClick={() => {
-                    onSelectCategory(category);
-                    setOpen(false);
-                  }}
-                  className={cn(
-                    "block w-full cursor-pointer px-3 py-2 text-left text-sm transition-colors hover:bg-muted",
-                    category === selectedCategory
-                      ? "font-semibold text-foreground"
-                      : "text-muted-foreground"
-                  )}
-                >
-                  {category}
-                </button>
-              ))}
-            </div>
-          </>
+          <div className="absolute top-full right-0 z-50 mt-2 w-40 overflow-hidden rounded-xl border border-border bg-popover py-1 shadow-lg">
+            {categories.map((category) => (
+              <button
+                key={category}
+                type="button"
+                onClick={() => {
+                  onSelectCategory(category);
+                  setOpen(false);
+                }}
+                className={cn(
+                  "block w-full cursor-pointer px-3 py-2 text-left text-sm transition-colors hover:bg-muted",
+                  category === selectedCategory
+                    ? "font-semibold text-foreground"
+                    : "text-muted-foreground"
+                )}
+              >
+                {category}
+              </button>
+            ))}
+          </div>
         )}
       </div>
 

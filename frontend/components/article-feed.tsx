@@ -13,7 +13,12 @@ const DEFAULT_PERSONAL_ACCENT = "oklch(0.64 0.26 322)";
 // renders until real pagination/infinite-scroll exists.
 const INITIAL_BATCH_SIZE = 100;
 
-export async function ArticleFeed() {
+export interface ArticleFeedProps {
+  /** True for the one-time redirect from /welcome right after onboarding. */
+  showTour?: boolean;
+}
+
+export async function ArticleFeed({ showTour = false }: ArticleFeedProps) {
   const [articles, session] = await Promise.all([
     getArticles(),
     auth.api.getSession({ headers: await headers() }),
@@ -29,6 +34,7 @@ export async function ArticleFeed() {
       articles={articles.slice(0, INITIAL_BATCH_SIZE)}
       initialCategory={favoriteCategory}
       personalAccent={personalColor}
+      showTour={showTour}
     />
   );
 }

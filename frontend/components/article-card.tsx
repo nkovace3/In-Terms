@@ -1,15 +1,14 @@
 "use client";
 
-import { useState } from "react";
-import { ArrowLeftRight, Loader2, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeftRight, ChevronDown, Loader2, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { translateArticle } from "@/lib/actions";
+import { CATEGORIES } from "@/lib/categories";
 import type { Article, InTerms } from "@/lib/types";
 
 export interface ArticleCardProps {
   article: Article;
-  /** Which category to translate into — no picker UI exists yet, so this is chosen by the caller. */
-  translationTarget: string;
   /**
    * Placeholder for the user's chosen "personal color" (from the future
    * sign-up color picker). Passed as a raw OKLCH string so it can be
@@ -18,27 +17,48 @@ export interface ArticleCardProps {
   personalAccent: string;
 }
 
-export function ArticleCard({
-  article,
-  translationTarget,
-  personalAccent,
-}: ArticleCardProps) {
+export function ArticleCard({ article, personalAccent }: ArticleCardProps) {
   const [flipped, setFlipped] = useState(false);
   const [inTerms, setInTerms] = useState<InTerms | null>(null);
   const [isTranslating, setIsTranslating] = useState(false);
   const [error, setError] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
-  async function handleTranslate() {
-    if (inTerms) {
-      setFlipped(true);
-      return;
+  // Can translate into anything except the article's own category.
+  const targets = CATEGORIES.filter(
+    (category) => category.toLowerCase() !== article.category.toLowerCase()
+  );
+
+  // Click-outside-to-close via a document listener, not a fullscreen
+  // backdrop div: this card's flip wrapper has transform-style:preserve-3d,
+  // which makes it the containing block for position:fixed descendants —
+  // so a `fixed inset-0` backdrop here only ever covered the card's own
+  // box, not the real viewport, and clicks outside the card fell through.
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
     }
 
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [menuOpen]);
+
+  async function handleTranslate(target: string) {
+    setMenuOpen(false);
     setIsTranslating(true);
     setError(false);
 
     try {
-      const result = await translateArticle(article.id, translationTarget);
+      // The backend caches each (article, target) translation in the
+      // database, so re-picking a target already generated this session
+      // is already cheap server-side — no need to duplicate that caching
+      // on the client.
+      const result = await translateArticle(article.id, target);
       setInTerms(result);
       setFlipped(true);
     } catch {
@@ -55,7 +75,7 @@ export function ArticleCard({
     >
       <div
         className={cn(
-          "relative h-[460px] w-full transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] [transform-style:preserve-3d]",
+          "relative h-[500px] w-full transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] [transform-style:preserve-3d]",
           flipped && "[transform:rotateY(180deg)]"
         )}
       >
@@ -69,12 +89,10 @@ export function ArticleCard({
           </div>
 
           <div className="flex flex-col gap-2">
-            <h3 className="line-clamp-2 text-xl font-bold tracking-tight text-foreground">
+            <h3 className="text-xl font-bold tracking-tight text-foreground">
               {article.headline}
             </h3>
-            <p className="line-clamp-2 text-sm text-muted-foreground">
-              {article.summary}
-            </p>
+            <p className="text-sm text-muted-foreground">{article.summary}</p>
           </div>
 
           <ul className="flex flex-1 flex-col gap-1.5 overflow-y-auto">
@@ -84,27 +102,51 @@ export function ArticleCard({
                 className="flex items-start gap-2 text-sm text-foreground"
               >
                 <span className="mt-1.5 size-1 shrink-0 rounded-full bg-muted-foreground" />
-                <span className="line-clamp-2">{point}</span>
+                <span>{point}</span>
               </li>
             ))}
           </ul>
 
-          <button
-            type="button"
-            onClick={handleTranslate}
-            disabled={isTranslating}
-            className="relative flex cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl border border-border bg-background py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-1000 ease-out group-hover:translate-x-full dark:via-white/10" />
-            {isTranslating ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Sparkles className="size-4" />
+          <div ref={menuRef} className="relative">
+            {menuOpen && (
+              <div className="absolute inset-x-0 bottom-full z-50 mb-2 max-h-48 overflow-y-auto rounded-xl border border-border bg-popover py-1 shadow-lg">
+                {targets.map((target) => (
+                  <button
+                    key={target}
+                    type="button"
+                    onClick={() => handleTranslate(target)}
+                    className="block w-full cursor-pointer px-4 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted"
+                  >
+                    {target}
+                  </button>
+                ))}
+              </div>
             )}
-            {isTranslating
-              ? `Translating to ${translationTarget}…`
-              : `Translate to ${translationTarget}`}
-          </button>
+
+            <button
+              type="button"
+              data-tour="translate-trigger"
+              onClick={() => setMenuOpen((value) => !value)}
+              disabled={isTranslating}
+              className="relative flex w-full cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl border border-border bg-background py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-1000 ease-out group-hover:translate-x-full dark:via-white/10" />
+              {isTranslating ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Sparkles className="size-4" />
+              )}
+              {isTranslating ? "Translating…" : "Translate"}
+              {!isTranslating && (
+                <ChevronDown
+                  className={cn(
+                    "size-3.5 transition-transform",
+                    menuOpen && "rotate-180"
+                  )}
+                />
+              )}
+            </button>
+          </div>
 
           {error && (
             <p className="text-center text-xs text-destructive">
@@ -136,12 +178,10 @@ export function ArticleCard({
               </div>
 
               <div className="flex flex-col gap-2">
-                <h3 className="line-clamp-2 text-xl font-bold tracking-tight text-foreground">
+                <h3 className="text-xl font-bold tracking-tight text-foreground">
                   {inTerms.headline}
                 </h3>
-                <p className="line-clamp-2 text-sm text-muted-foreground">
-                  {inTerms.summary}
-                </p>
+                <p className="text-sm text-muted-foreground">{inTerms.summary}</p>
               </div>
 
               <ul className="flex flex-1 flex-col gap-1.5 overflow-y-auto">
@@ -154,7 +194,7 @@ export function ArticleCard({
                       className="mt-1.5 size-1 shrink-0 rounded-full"
                       style={{ backgroundColor: "var(--personal-accent)" }}
                     />
-                    <span className="line-clamp-2">{point}</span>
+                    <span>{point}</span>
                   </li>
                 ))}
               </ul>
