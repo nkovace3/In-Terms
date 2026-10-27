@@ -1,10 +1,9 @@
-import { PromptBox } from "@/components/prompt-box";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
-import { AmbientGlow } from "@/components/ambient-glow";
+import { ArticleFeed } from "@/components/article-feed";
 
-export default async function Home() {
+export default async function Home(props: PageProps<"/">) {
   const session = await auth.api.getSession({
     headers: await headers(),
   });
@@ -13,10 +12,8 @@ export default async function Home() {
     redirect("/login");
   }
 
-  return (
-    <section className="relative flex flex-1 items-center justify-center overflow-hidden px-4">
-      <AmbientGlow />
-      <PromptBox />
-    </section>
-  );
+  const searchParams = await props.searchParams;
+  const showTour = searchParams.tour === "welcome";
+
+  return <ArticleFeed showTour={showTour} />;
 }

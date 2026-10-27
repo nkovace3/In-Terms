@@ -176,4 +176,4 @@ async def tiny_test():
 
 if __name__ == "__main__":
     # asyncio.run(end_to_end_with_embedding())
-    asyncio.run(tiny_test())
+    asyncio.run(end_to_end_with_embedding())
