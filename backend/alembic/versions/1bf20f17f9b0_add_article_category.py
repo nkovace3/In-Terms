@@ -1,7 +1,7 @@
 """add article category
 
 Revision ID: 1bf20f17f9b0
-Revises: 
+Revises: a694a5ca4d70
 Create Date: 2026-09-19 18:11:20.563078
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '1bf20f17f9b0'
-down_revision: Union[str, Sequence[str], None] = None
+down_revision: Union[str, Sequence[str], None] = 'a694a5ca4d70'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
