@@ -33,8 +33,8 @@ feeds = [
         'category': 'US Politics'
     },
     {
-        'url': 'https://feeds.a.dj.com/rss/WSJcomUSBusiness.xml',
-        'source': 'WSJ',
+        'url': 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10001147',
+        'source': 'CNBC',
         'category': 'Business'
     }
 

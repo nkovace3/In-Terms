@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, CircleUserRound } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { ChevronDown, CircleUserRound, LogOut, Settings } from "lucide-react";
+import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 
 export interface OverlayNavProps {
@@ -15,8 +18,6 @@ export interface OverlayNavProps {
  * Deliberately not the site's main SiteNav — this floats over content
  * instead of occupying layout space, and stays neutral (no gold/personal
  * accent) so it never competes with the content underneath it.
- *
- * The profile icon is a placeholder — not wired to real auth/menu yet.
  */
 export function OverlayNav({
   categories,
@@ -87,12 +88,85 @@ export function OverlayNav({
         )}
       </div>
 
+      <ProfileMenu />
+    </header>
+  );
+}
+
+function ProfileMenu() {
+  const router = useRouter();
+  const { data: session } = authClient.useSession();
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Same document-listener approach as the category menu above — see the
+  // backdrop-filter note there.
+  useEffect(() => {
+    if (!open) return;
+
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  const handleSignOut = async () => {
+    await authClient.signOut({
+      fetchOptions: {
+        onSuccess: () => {
+          router.push("/login");
+          router.refresh();
+        },
+      },
+    });
+  };
+
+  return (
+    <div ref={menuRef} className="pointer-events-auto relative">
       <button
         type="button"
-        className="pointer-events-auto flex size-8 cursor-pointer items-center justify-center rounded-full text-foreground/80 transition-colors hover:text-foreground"
+        aria-label="Profile menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex size-8 cursor-pointer items-center justify-center rounded-full text-foreground/80 transition-colors hover:text-foreground"
       >
         <CircleUserRound className="size-6" />
       </button>
-    </header>
+
+      {open && (
+        <div className="absolute top-full right-0 z-50 mt-2 w-56 overflow-hidden rounded-xl border border-border bg-popover py-1 shadow-lg">
+          {session?.user && (
+            <div className="border-b border-border px-3 py-2">
+              <p className="truncate text-sm font-semibold text-foreground">
+                {session.user.name}
+              </p>
+              <p className="truncate text-xs text-muted-foreground">
+                {session.user.email}
+              </p>
+            </div>
+          )}
+          <Link
+            href="/preferences"
+            onClick={() => setOpen(false)}
+            className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <Settings className="size-4" />
+            Preferences
+          </Link>
+          <button
+            type="button"
+            onClick={handleSignOut}
+            className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <LogOut className="size-4" />
+            Log out
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

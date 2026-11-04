@@ -12,10 +12,29 @@ const CATEGORIES = ["All", ...BASE_CATEGORIES];
 
 const DEFAULT_COLOR = "#c026d3";
 
-export function OnboardingPreferences() {
+export interface OnboardingPreferencesProps {
+  /**
+   * "onboarding" is the one-time welcome flow (ends in the tour);
+   * "edit" is the same form reopened later from the profile menu.
+   */
+  mode?: "onboarding" | "edit";
+  initialCategory?: string;
+  initialColor?: string;
+}
+
+export function OnboardingPreferences({
+  mode = "onboarding",
+  initialCategory,
+  initialColor,
+}: OnboardingPreferencesProps) {
   const router = useRouter();
-  const [favoriteCategory, setFavoriteCategory] = useState<string[]>([]);
-  const [personalColor, setPersonalColor] = useState(DEFAULT_COLOR);
+  const isEdit = mode === "edit";
+  const [favoriteCategory, setFavoriteCategory] = useState<string[]>(
+    initialCategory ? [initialCategory] : []
+  );
+  const [personalColor, setPersonalColor] = useState(
+    initialColor || DEFAULT_COLOR
+  );
 
   const handleUserCustomization = async () => {
     await authClient.updateUser({
@@ -24,7 +43,7 @@ export function OnboardingPreferences() {
       onboardingComplete: true,
     });
 
-    router.push("/?tour=welcome");
+    router.push(isEdit ? "/" : "/?tour=welcome");
     router.refresh();
   }
 
@@ -32,11 +51,12 @@ export function OnboardingPreferences() {
     <div className="flex w-full max-w-xl flex-col items-center gap-10 text-center">
       <div className="flex flex-col items-center gap-2">
         <h1 className="text-3xl font-bold tracking-tight text-foreground">
-          Make it yours
+          {isEdit ? "Preferences" : "Make it yours"}
         </h1>
         <p className="text-sm text-muted-foreground">
-          Pick a default category and a color that describes you — you can
-          change these anytime.
+          {isEdit
+            ? "Update your default category and signature color."
+            : "Pick a default category and a color that describes you — you can change these anytime."}
         </p>
       </div>
 
@@ -91,15 +111,27 @@ export function OnboardingPreferences() {
         </FieldDescription>
       </FieldSet>
 
-      <Button
-        type="button"
-        variant="outline"
-        disabled={favoriteCategory.length === 0}
-        className="w-full max-w-xs"
-        onClick = {handleUserCustomization}
-      >
-        Continue
-      </Button>
+      <div className="flex w-full max-w-xs flex-col gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          disabled={favoriteCategory.length === 0}
+          className="w-full"
+          onClick = {handleUserCustomization}
+        >
+          {isEdit ? "Save" : "Continue"}
+        </Button>
+        {isEdit && (
+          <Button
+            type="button"
+            variant="ghost"
+            className="w-full"
+            onClick={() => router.push("/")}
+          >
+            Cancel
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
