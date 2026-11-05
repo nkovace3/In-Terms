@@ -1,0 +1,34 @@
+# Manual diagnostic: can GitHub's servers reach each RSS feed?
+#
+# Some publishers (ESPN, for one) block datacenter IPs, so a feed that works
+# on your laptop can come back empty here — and here is where the daily
+# ingestion runs. Use this before adding or swapping a feed.
+# No secrets needed; makes no API calls beyond fetching the feeds.
+
+name: Check feeds
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14"
+          enable-cache: true
+
+      - run: uv sync --locked --no-dev
+
+      - name: Current feeds
+        run: uv run python -m scripts.check_feeds
+
+      - name: Replacement candidates
+        run: uv run python -m scripts.check_feeds --candidates
