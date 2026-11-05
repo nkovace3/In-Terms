@@ -61,6 +61,35 @@ def test_parse_entry_skips_unparseable_date():
     assert rss.parse_entry(make_entry(published="not a date"), FEED) is None
 
 
+# --- rss betting filter -------------------------------------------------------
+# Real headlines from the CBS feeds and earlier ingestion runs.
+
+
+@pytest.mark.parametrize("title", [
+    "Pacers vs. Grizzlies NBA picks: Indiana should have more players available against surprising Memphis",
+    "NBA player props, odds, picks: Kyrie Irving among best bets for Wednesday, Nov. 4",
+    "Week 9 NFL odds, picks, predictions: Computer model backs Chiefs and Commanders",
+    "Best NFL parlay for Sunday from a proven model",
+    "FanDuel promo code: Get $200 in bonus bets",
+    "Prisco's Week 9 NFL expert picks: Jaguars roll over Lamar Jackson-less Ravens, Cowboys rebound",
+])
+def test_betting_headlines_are_detected(title):
+    assert rss.is_betting_content(title)
+
+
+@pytest.mark.parametrize("title", [
+    "Field Yates Drops 2027 NFL Mock Draft Top 10 Picks",          # draft picks, not betting picks
+    "Grading every NBA lottery pick's first two weeks as impressive 2026 rookie class dazzles early",
+    "Jordan Love picks Panthers apart; Christian Watson's midgame hospital trip",  # "picks" as a verb
+    "New Flutter CEO bets on FanDuel promotions to win customers as profits suffer",  # "bets" as a verb
+    "Matthew Stafford's wife calls out NFL over apparent scheduling disadvantage given to Rams",
+    "Former Yankees, Rangers All-Star Mark Teixeira wins U.S. House seat in Texas",
+    "MLB rumors: The only Oriole not on the trading block, Rays' Drew Rasmussen plan and Astros add to manager hunt",
+])
+def test_real_news_headlines_are_kept(title):
+    assert not rss.is_betting_content(title)
+
+
 # --- rss staleness ------------------------------------------------------------
 
 

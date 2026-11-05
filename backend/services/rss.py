@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 import feedparser
@@ -29,20 +30,25 @@ feeds = [
     # Sports come from CBS rather than ESPN: ESPN's feeds return an empty 202
     # to requests from GitHub Actions (where ingestion runs), even with a
     # browser User-Agent. Verify any new feed with the "Check feeds" workflow.
+    # CBS mixes betting picks/odds pieces into its headlines; exclude_betting
+    # drops them before they cost anything to process.
     {
         "url": "https://www.cbssports.com/rss/headlines/nba/",
         "source": "CBS Sports",
         "category": "NBA",
+        "exclude_betting": True,
     },
     {
         "url": "https://www.cbssports.com/rss/headlines/nfl/",
         "source": "CBS Sports",
         "category": "NFL",
+        "exclude_betting": True,
     },
     {
         "url": "https://www.cbssports.com/rss/headlines/mlb/",
         "source": "CBS Sports",
         "category": "MLB",
+        "exclude_betting": True,
     },
     {
         'url': 'https://realityblurb.com/feed/',
@@ -87,6 +93,12 @@ async def get_latest_articles(feed) -> list[RSSResult]:
         if article is not None
     ]
 
+    if feed.get('exclude_betting'):
+        kept = [article for article in articles if not is_betting_content(article.title)]
+        if len(kept) < len(articles):
+            logger.info("Feed %s: skipped %d betting articles", name, len(articles) - len(kept))
+        articles = kept
+
     newest = newest_published_at(articles)
     if newest is None or is_stale(newest):
         logger.warning(
@@ -124,6 +136,29 @@ def parse_entry(entry, feed) -> RSSResult | None:
             entry.get('title', '<no title>'),
         )
         return None
+
+# Phrases, not single words: "picks" alone would also drop "Mock Draft Top 10
+# Picks", and "bets" would drop real business news like "Flutter CEO bets on
+# FanDuel promotions". Matched against headlines, case-insensitively.
+BETTING_PATTERNS = re.compile(
+    r"""
+      \bodds\b                                      # "NFL odds, picks, predictions"
+    | \bbest\ bets?\b
+    | \bprops\b                                     # "player props"
+    | \bparlays?\b
+    | \bsportsbooks?\b
+    | \bbetting\b
+    | \b(?:promo|bonus)\ codes?\b
+    | \bsportsline\b                                # CBS's betting-model brand
+    | \b(?:computer|projection)\ model\b           # "Computer model backs Chiefs"
+    | \b(?:nba|nfl|mlb|college\ football|college\ basketball)\ picks\b   # "NBA picks:"
+    | \bexpert\ picks\b                             # "Week 9 NFL expert picks"
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+def is_betting_content(title: str) -> bool:
+    return BETTING_PATTERNS.search(title) is not None
 
 def feed_name(feed) -> str:
     return f"{feed['source']}/{feed['category']}"
