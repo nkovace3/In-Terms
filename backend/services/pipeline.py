@@ -1,33 +1,100 @@
+import logging
+from dataclasses import dataclass
+
+from sqlalchemy.orm import Session
+
+from config import get_settings
 from services.researcher import research_article, synthesize_search
 from services.editor import edit_story
-from services.rss import get_latest_articles, feeds
+from services.rss import get_latest_articles, feeds, feed_name
 from services.dynamics import extract_dynamics, embed_dynamics
+from services.usage import track_usage
 from schemas.rss import RSSResult
 from database import SessionLocal
 from repository import save_article, article_exists
 
-async def run_ingestion():
+logger = logging.getLogger(__name__)
+
+@dataclass
+class FeedResult:
+    feed: str
+    fetched: int = 0
+    saved: int = 0
+    skipped: int = 0
+    failed: int = 0
+    error: str | None = None
+
+async def run_ingestion() -> list[FeedResult]:
     db = SessionLocal()
+    results = []
 
     try:
         for feed in feeds:
-            articles = await get_latest_articles(feed)
-
-            for article in articles:
-                if await article_exists(db, article.url):
-                    print(f'Skipping existing article: {article.title}')
-                    continue
-                try:
-                    story = await process_article(article)
-                    dynamics = await extract_dynamics(story)
-                    embedding = await embed_dynamics(dynamics)
-                    await save_article(db=db, article=article, story=story, dynamics=dynamics, embedding=embedding)
-                    print(f"Saved: {article.title}")
-                except Exception as e:
-                    print(f"Failed: {article.title}")
-                    print(e)
+            results.append(await ingest_feed(db, feed))
     finally:
         db.close()
+
+    for result in results:
+        log = logger.warning if result.error or result.failed else logger.info
+        log(
+            "Feed %s: fetched=%d saved=%d skipped=%d failed=%d%s",
+            result.feed,
+            result.fetched,
+            result.saved,
+            result.skipped,
+            result.failed,
+            f" error={result.error}" if result.error else "",
+        )
+
+    return results
+
+async def ingest_feed(db: Session, feed) -> FeedResult:
+    """
+    Ingest one feed. Never raises: a feed that can't be fetched, or an
+    article that fails partway through, is logged and counted so the rest of
+    the run carries on.
+    """
+    result = FeedResult(feed=feed_name(feed))
+    settings = get_settings()
+    pricing = settings.pricing()
+    limit = settings.max_new_articles_per_feed
+
+    try:
+        articles = await get_latest_articles(feed)
+    except Exception as exc:
+        logger.exception("Could not fetch feed %s", result.feed)
+        result.error = f"{type(exc).__name__}: {exc}"
+        return result
+
+    result.fetched = len(articles)
+
+    for article in articles:
+        # Count attempts, not just successes, so a run of failures can't
+        # blow through the cost cap either.
+        if result.saved + result.failed >= limit:
+            logger.info("Feed %s hit the cap of %d new articles this run", result.feed, limit)
+            break
+        try:
+            if await article_exists(db, article.url):
+                result.skipped += 1
+                continue
+
+            with track_usage() as usage:
+                story = await process_article(article)
+                dynamics = await extract_dynamics(story)
+                embedding = await embed_dynamics(dynamics)
+                await save_article(db=db, article=article, story=story, dynamics=dynamics, embedding=embedding)
+
+            result.saved += 1
+            logger.info("Saved %r [%s]", article.title, usage.summary(pricing))
+        except Exception:
+            # A failed commit leaves the session unusable until rolled back —
+            # without this, every later article in the run failed too.
+            db.rollback()
+            result.failed += 1
+            logger.exception("Failed to process %r", article.title)
+
+    return result
 
 async def process_article(article: RSSResult):
     intermediary_research = await research_article(article)

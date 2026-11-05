@@ -1,10 +1,15 @@
 import json
+import logging
 
+from config import get_settings
 from services.google import execute_query
+from services.usage import track_usage
 from schemas.outputs import FinalStory, StoryDynamics, InTermsResult
 from models import Article
 from sqlalchemy.orm import Session
 from repository import get_in_terms, get_article, find_similar_articles, save_in_terms
+
+logger = logging.getLogger(__name__)
 
 async def generate_in_terms(story: FinalStory, dynamics: StoryDynamics, target_term: str, similar_article, similar_dynamics: StoryDynamics | None) -> InTermsResult:
     # --- PROMPT V2 (kept as a fallback, not currently used — adds rule 8,
@@ -185,6 +190,33 @@ async def get_or_generate_in_terms(db: Session, article_id: int, target_category
     if target_category == article.category:
         return None
 
+    # Generated on a cache miss while the user waits, so this latency is
+    # directly user-facing — worth logging every time.
+    with track_usage() as usage:
+        result = await generate_in_terms_for_article(db, article, target_category)
+    logger.info(
+        "Generated In Terms for article %d -> %s [%s]",
+        article_id,
+        target_category,
+        usage.summary(get_settings().pricing()),
+    )
+
+    saved = await save_in_terms(
+        db=db,
+        article_id=article_id,
+        target_category=target_category,
+        result=result
+    )
+
+    return saved
+
+async def generate_in_terms_for_article(db: Session, article: Article, target_category: str) -> InTermsResult:
+    """
+    Build the prompt inputs for one article and generate its In Terms
+    result. No cache lookup and no save — get_or_generate_in_terms handles
+    those for the API; the eval script calls this directly to score fresh
+    output from the current prompt.
+    """
     similar_articles = await find_similar_articles(
         db=db,
         embedding=article.embedding,
@@ -216,19 +248,19 @@ async def get_or_generate_in_terms(db: Session, article_id: int, target_category
     # Same legacy-data fallback as similar_dynamics above.
     dynamics = StoryDynamics(**(article.dynamics or {}))
 
-    result = await generate_in_terms(
+    if similar_article is None:
+        # find_similar_articles only looks back 14 days, so if ingestion
+        # stalls, every generation silently loses its reference example.
+        logger.warning(
+            "No reference example in %s for article %d — generating without one",
+            target_category,
+            article.id,
+        )
+
+    return await generate_in_terms(
                 story=story,
                 dynamics=dynamics,
                 target_term=target_category,
                 similar_article=similar_article,
                 similar_dynamics=similar_dynamics,
             )
-
-    saved = await save_in_terms(
-        db=db,
-        article_id=article_id,
-        target_category=target_category,
-        result=result
-    )
-
-    return saved

@@ -3,7 +3,10 @@ from schemas.research import ResearchExecutionSteps, ResearchDecision, ResearchP
 from services.search import search_web
 from services.google import execute_query
 
-MAX_SEARCHES = 5
+# Each search costs a Tavily credit and re-sends all evidence so far to the
+# next LLM step. Measured: the agent used every search it was given (it never
+# declared itself done early), so this cap is the main cost lever.
+MAX_SEARCHES = 2
 
 async def research_article(article: RSSResult) -> ResearchExecutionSteps:
     plan = await create_research_plan(article)

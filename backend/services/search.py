@@ -1,10 +1,14 @@
+import time
+
 import httpx
 from config import get_settings
 from schemas.search import Source, SearchResult
+from services.usage import record_call
 
 TAVILY_SEARCH_URL = 'https://api.tavily.com/search'
 
 async def search_web(query: str) -> list[SearchResult]:
+    start = time.perf_counter()
     async with httpx.AsyncClient(timeout=30) as client:
         response = await client.post(
             TAVILY_SEARCH_URL,
@@ -20,6 +24,8 @@ async def search_web(query: str) -> list[SearchResult]:
         )
         response.raise_for_status()
         data = response.json()
+
+    record_call("search", "tavily", time.perf_counter() - start)
 
     return [
         SearchResult(
