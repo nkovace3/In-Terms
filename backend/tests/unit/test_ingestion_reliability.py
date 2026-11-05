@@ -191,6 +191,19 @@ async def test_feed_fetch_error_is_reported_not_raised(fake_pipeline, monkeypatc
     assert result.saved == 0
 
 
+async def test_empty_feed_counts_as_a_failure(fake_pipeline, monkeypatch):
+    # A blocked/dead feed returns nothing. It must be recorded as an error so
+    # the scheduled run goes red — it used to be a warning and the run passed.
+    async def empty_feed(feed):
+        raise rss.FeedUnavailableError("Feed Example/NBA returned no entries (status=202, error=None)")
+
+    monkeypatch.setattr(pipeline, "get_latest_articles", empty_feed)
+
+    result = await pipeline.ingest_feed(FakeSession(), FEED)
+
+    assert result.error.startswith("FeedUnavailableError")
+
+
 # --- scheduler --once exit code -----------------------------------------------
 
 

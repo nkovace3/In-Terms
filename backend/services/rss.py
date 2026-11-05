@@ -17,6 +17,14 @@ tzinfos = {"EST": gettz("America/New_York")}
 # exactly what happened to the old WSJ business feed, unnoticed).
 STALE_FEED_AFTER = timedelta(hours=72)
 
+# feedparser's default User-Agent identifies it as a script, which bot
+# protection (ESPN's, at least) answers with an empty 202 when the request
+# comes from a datacenter like GitHub Actions. Identify as a normal browser.
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+)
+
 feeds = [
     {
         "url": "https://www.espn.com/espn/rss/nba/news",
@@ -51,21 +59,24 @@ feeds = [
 
 ]
 
+class FeedUnavailableError(Exception):
+    """The feed responded with no entries — down, moved, or blocking us."""
+
 async def get_latest_articles(feed) -> list[RSSResult]:
     # feedparser does blocking network I/O — run it off the event loop.
-    executed_feed = await asyncio.to_thread(feedparser.parse, feed['url'])
+    executed_feed = await asyncio.to_thread(
+        feedparser.parse, feed['url'], agent=USER_AGENT
+    )
     name = feed_name(feed)
 
     if not executed_feed.entries:
         # feedparser never raises on HTTP/network errors; it just returns
-        # nothing, which is how a dead feed used to fail silently.
-        logger.warning(
-            "Feed %s returned no entries (status=%s, error=%s)",
-            name,
-            executed_feed.get('status'),
-            executed_feed.get('bozo_exception'),
+        # nothing. Raise instead, so the pipeline records it as a failure and
+        # the scheduled run goes red rather than quietly saving nothing.
+        raise FeedUnavailableError(
+            f"Feed {name} returned no entries "
+            f"(status={executed_feed.get('status')}, error={executed_feed.get('bozo_exception')})"
         )
-        return []
 
     articles = [
         article

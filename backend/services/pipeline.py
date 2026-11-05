@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from config import get_settings
 from services.researcher import research_article, synthesize_search
 from services.editor import edit_story
-from services.rss import get_latest_articles, feeds, feed_name
+from services.rss import FeedUnavailableError, get_latest_articles, feeds, feed_name
 from services.dynamics import extract_dynamics, embed_dynamics
 from services.usage import track_usage
 from schemas.rss import RSSResult
@@ -61,6 +61,12 @@ async def ingest_feed(db: Session, feed) -> FeedResult:
 
     try:
         articles = await get_latest_articles(feed)
+    except FeedUnavailableError as exc:
+        # Expected failure mode (feed down or blocking us) — one clear line,
+        # no stack trace.
+        logger.error("%s", exc)
+        result.error = f"{type(exc).__name__}: {exc}"
+        return result
     except Exception as exc:
         logger.exception("Could not fetch feed %s", result.feed)
         result.error = f"{type(exc).__name__}: {exc}"
