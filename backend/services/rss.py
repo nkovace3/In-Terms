@@ -17,28 +17,31 @@ tzinfos = {"EST": gettz("America/New_York")}
 # exactly what happened to the old WSJ business feed, unnoticed).
 STALE_FEED_AFTER = timedelta(hours=72)
 
-# feedparser's default User-Agent identifies it as a script, which bot
-# protection (ESPN's, at least) answers with an empty 202 when the request
-# comes from a datacenter like GitHub Actions. Identify as a normal browser.
+# feedparser's default User-Agent identifies it as a script, which some bot
+# protection rejects outright. A browser User-Agent avoids that — though it
+# can't get past IP-based blocking (ESPN refuses GitHub Actions regardless).
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
 )
 
 feeds = [
+    # Sports come from CBS rather than ESPN: ESPN's feeds return an empty 202
+    # to requests from GitHub Actions (where ingestion runs), even with a
+    # browser User-Agent. Verify any new feed with the "Check feeds" workflow.
     {
-        "url": "https://www.espn.com/espn/rss/nba/news",
-        "source": "ESPN",
+        "url": "https://www.cbssports.com/rss/headlines/nba/",
+        "source": "CBS Sports",
         "category": "NBA",
     },
     {
-        "url": "https://www.espn.com/espn/rss/nfl/news",
-        "source": "ESPN",
+        "url": "https://www.cbssports.com/rss/headlines/nfl/",
+        "source": "CBS Sports",
         "category": "NFL",
     },
     {
-        "url": "https://www.espn.com/espn/rss/mlb/news",
-        "source": "ESPN",
+        "url": "https://www.cbssports.com/rss/headlines/mlb/",
+        "source": "CBS Sports",
         "category": "MLB",
     },
     {
