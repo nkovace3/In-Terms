@@ -22,6 +22,7 @@ class FeedResult:
     saved: int = 0
     skipped: int = 0
     failed: int = 0
+    deferred: int = 0
     error: str | None = None
 
 async def run_ingestion() -> list[FeedResult]:
@@ -37,11 +38,12 @@ async def run_ingestion() -> list[FeedResult]:
     for result in results:
         log = logger.warning if result.error or result.failed else logger.info
         log(
-            "Feed %s: fetched=%d saved=%d skipped=%d failed=%d%s",
+            "Feed %s: fetched=%d saved=%d skipped=%d deferred=%d failed=%d%s",
             result.feed,
             result.fetched,
             result.saved,
             result.skipped,
+            result.deferred,
             result.failed,
             f" error={result.error}" if result.error else "",
         )
@@ -75,9 +77,9 @@ async def ingest_feed(db: Session, feed) -> FeedResult:
     result.fetched = len(articles)
 
     for article in articles:
-        # Count attempts, not just successes, so a run of failures can't
-        # blow through the cost cap either.
-        if result.saved + result.failed >= limit:
+        # Count attempts, not just successes, so a run of failures or
+        # deferrals can't blow through the cost cap either.
+        if result.saved + result.failed + result.deferred >= limit:
             logger.info("Feed %s hit the cap of %d new articles this run", result.feed, limit)
             break
         try:
@@ -93,6 +95,11 @@ async def ingest_feed(db: Session, feed) -> FeedResult:
 
             result.saved += 1
             logger.info("Saved %r [%s]", article.title, usage.summary(pricing))
+        except InsufficientResearch as exc:
+            # Not saved, so the next run retries it once coverage exists.
+            # Not a failure either: a too-new story shouldn't turn the run red.
+            result.deferred += 1
+            logger.warning("Deferred %r: research didn't cover the story (%s) [%s]", article.title, exc, usage.summary(pricing))
         except Exception:
             # A failed commit leaves the session unusable until rolled back —
             # without this, every later article in the run failed too.
@@ -102,11 +109,24 @@ async def ingest_feed(db: Session, feed) -> FeedResult:
 
     return result
 
+class InsufficientResearch(Exception):
+    """Research didn't cover the story, so there's nothing to write a card from."""
+
 async def process_article(article: RSSResult):
     intermediary_research = await research_article(article)
 
     research_results = await synthesize_search(intermediary_research)
 
-    final_story = await edit_story(research_results)
+    # Without this, the editor still had to fill every card field and
+    # published what it was given: "No Information Available" when search
+    # found nothing (a story ingested ~2h after publishing), or a card about
+    # RealityBlurb itself when search returned the site instead of the story.
+    if not research_results.on_topic or not research_results.facts:
+        raise InsufficientResearch(
+            f"on_topic={research_results.on_topic}, facts={len(research_results.facts)}, "
+            f"search results={len(intermediary_research.sources)}"
+        )
+
+    final_story = await edit_story(research_results, article.title)
 
     return final_story

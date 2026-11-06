@@ -4,13 +4,18 @@ from schemas.research import ResearchResult
 from schemas.outputs import FinalStory
 from services.google import execute_query
 
-async def edit_story(research: ResearchResult) -> FinalStory:
+async def edit_story(research: ResearchResult, article_title: str) -> FinalStory:
     prompt = f"""
         You are the editor for a short-form news platform designed for
         Gen Z readers who want to understand what is happening quickly.
 
         Your job is to turn the provided research into a concise,
         engaging news story.
+
+        ORIGINAL ARTICLE TITLE:
+        {article_title}
+        This tells you which story you are writing about. Your card must
+        be about this story. Take facts only from the research below.
 
         RESEARCH:
         {research}

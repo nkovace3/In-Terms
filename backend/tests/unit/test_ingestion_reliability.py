@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from feedparser import FeedParserDict
 
+from schemas.research import ResearchExecutionSteps, ResearchResult
 from schemas.rss import RSSResult
 from services import pipeline, rss
 from services.usage import Pricing, record_call, track_usage
@@ -127,7 +128,7 @@ def fake_pipeline(monkeypatch):
     `articles` (what the feed returns), `existing` (URLs already saved),
     `fail_urls` (URLs whose processing raises), and `saved` (what got saved).
     """
-    state = {"articles": [], "existing": set(), "fail_urls": set(), "saved": [], "cap": 10}
+    state = {"articles": [], "existing": set(), "fail_urls": set(), "thin_urls": set(), "saved": [], "cap": 10}
 
     async def fake_get_latest_articles(feed):
         return state["articles"]
@@ -138,6 +139,8 @@ def fake_pipeline(monkeypatch):
     async def fake_process_article(article):
         if article.url in state["fail_urls"]:
             raise RuntimeError("LLM call failed")
+        if article.url in state["thin_urls"]:
+            raise pipeline.InsufficientResearch("on_topic=False")
         return "story"
 
     async def fake_extract_dynamics(story):
@@ -206,6 +209,87 @@ async def test_cost_cap_limits_new_articles_per_feed(monkeypatch, fake_pipeline)
     # /0 skipped (free), /1 failed (counts), /2 saved (counts) -> cap of 2 hit.
     assert fake_pipeline["saved"] == ["https://example.com/2"]
     assert (result.skipped, result.failed, result.saved) == (1, 1, 1)
+
+
+async def test_article_without_research_is_deferred_not_saved(fake_pipeline):
+    fake_pipeline["articles"] = [make_article("https://example.com/thin"), make_article("https://example.com/ok")]
+    fake_pipeline["thin_urls"] = {"https://example.com/thin"}
+
+    result = await pipeline.ingest_feed(FakeSession(), FEED)
+
+    # Not saved, so it's retried next run — and not a failure, so a story
+    # that's simply too new to research doesn't turn the run red.
+    assert fake_pipeline["saved"] == ["https://example.com/ok"]
+    assert (result.deferred, result.failed, result.saved) == (1, 0, 1)
+
+
+async def test_deferred_articles_count_toward_the_cap(monkeypatch, fake_pipeline):
+    class CappedSettings:
+        max_new_articles_per_feed = 2
+
+        def pricing(self):
+            return None
+
+    monkeypatch.setattr(pipeline, "get_settings", lambda: CappedSettings())
+    fake_pipeline["articles"] = [make_article(f"https://example.com/{i}") for i in range(4)]
+    fake_pipeline["thin_urls"] = {"https://example.com/0", "https://example.com/1"}
+
+    result = await pipeline.ingest_feed(FakeSession(), FEED)
+
+    # Research still cost money, so two deferrals use up the cap.
+    assert fake_pipeline["saved"] == []
+    assert result.deferred == 2
+
+
+# --- pipeline.process_article research gate ----------------------------------
+
+
+@pytest.fixture
+def fake_steps(monkeypatch):
+    """Stubs research/synthesis with a chosen ResearchResult; records editor calls."""
+    state = {"research": None, "edited": []}
+
+    async def fake_research_article(article):
+        return ResearchExecutionSteps(article=article)
+
+    async def fake_synthesize_search(step):
+        return state["research"]
+
+    async def fake_edit_story(research, article_title):
+        state["edited"].append(article_title)
+        return "story"
+
+    monkeypatch.setattr(pipeline, "research_article", fake_research_article)
+    monkeypatch.setattr(pipeline, "synthesize_search", fake_synthesize_search)
+    monkeypatch.setattr(pipeline, "edit_story", fake_edit_story)
+    return state
+
+
+@pytest.mark.parametrize("research", [
+    # Article 166: search found nothing -> "No Information Available" card.
+    ResearchResult(facts=[], context=[], sources=[], on_topic=False),
+    # Article 167: facts about the publisher's site, not the story.
+    ResearchResult(facts=["Reality Blurb operates as a blog."], sources=[], on_topic=False),
+    # Model says on-topic but extracted nothing — still nothing to write.
+    ResearchResult(facts=[], sources=[], on_topic=True),
+])
+async def test_editor_is_not_called_without_on_topic_facts(fake_steps, research):
+    fake_steps["research"] = research
+
+    with pytest.raises(pipeline.InsufficientResearch):
+        await pipeline.process_article(make_article("https://example.com/x"))
+
+    assert fake_steps["edited"] == []
+
+
+async def test_editor_gets_the_article_title(fake_steps):
+    fake_steps["research"] = ResearchResult(facts=["A fact."], sources=[], on_topic=True)
+    article = make_article("https://example.com/x")
+
+    assert await pipeline.process_article(article) == "story"
+    # The editor used to see only the research, so with nothing usable it
+    # had no idea which story it was writing.
+    assert fake_steps["edited"] == [article.title]
 
 
 async def test_feed_fetch_error_is_reported_not_raised(fake_pipeline, monkeypatch):

@@ -184,6 +184,13 @@ async def synthesize_search(step: ResearchExecutionSteps) -> ResearchResult:
                 Include the sources that directly support the facts or
                 context you extracted.
 
+                ON_TOPIC:
+                True only if the evidence actually covers the specific
+                event in the article title. False if the evidence is empty,
+                or is about something else — a different event, the same
+                people in an unrelated story, or the publishing website
+                itself. If false, leave FACTS and CONTEXT empty.
+
                 Rules:
                 - Only include information supported by the evidence.
                 - Do not invent or infer facts.

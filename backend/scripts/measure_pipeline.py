@@ -21,7 +21,7 @@ from collections import defaultdict
 from config import get_settings
 from logging_config import configure_logging
 from services.dynamics import embed_dynamics, extract_dynamics
-from services.pipeline import process_article
+from services.pipeline import InsufficientResearch, process_article
 from services.rss import feed_name, feeds, get_latest_articles
 from services.usage import UsageReport, track_usage
 
@@ -35,10 +35,16 @@ async def measure(count: int) -> list[UsageReport]:
             continue
 
         article = articles[0]
-        with track_usage() as usage:
-            story = await process_article(article)
-            dynamics = await extract_dynamics(story)
-            await embed_dynamics(dynamics)
+        try:
+            with track_usage() as usage:
+                story = await process_article(article)
+                dynamics = await extract_dynamics(story)
+                await embed_dynamics(dynamics)
+        except InsufficientResearch as exc:
+            # Excluded from the averages: it stops before the editor, so it
+            # would understate per-article cost.
+            print(f"{feed_name(feed):<24} deferred ({exc}), not counted")
+            continue
 
         print(f"{feed_name(feed):<24} {usage.summary(get_settings().pricing())}")
         print(f"{'':<24} {article.title}")

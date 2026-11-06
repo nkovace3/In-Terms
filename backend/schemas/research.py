@@ -28,3 +28,7 @@ class ResearchResult(BaseModel):
     facts: list[str] = []
     context: list[str] = []
     sources: list[Source]
+    # Last, so the model decides after extracting rather than before. False
+    # means the evidence is about something else (e.g. the publisher's own
+    # site), and the pipeline won't write a card from it.
+    on_topic: bool
