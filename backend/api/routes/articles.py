@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from database import SessionLocal
 from repository import get_all_articles, get_article
-from services.in_terms import get_or_generate_in_terms, DailyLimitReached
+from services.in_terms import get_or_generate_in_terms, DailyLimitReached, SensitiveStory
 
 from schemas.outputs import ArticleResponse, InTermsResponse
 
@@ -60,6 +60,11 @@ async def get_article_in_terms(article_id: int, target_category: str):
             raise HTTPException(
                 status_code=429,
                 detail="Daily translation limit reached"
+            )
+        except SensitiveStory:
+            raise HTTPException(
+                status_code=403,
+                detail="In Terms is off for sensitive stories"
             )
 
         if result is None:

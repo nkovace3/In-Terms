@@ -1,8 +1,9 @@
 """
-Daily In Terms generation cap — no database, no network, no API keys required.
+In Terms gates — no database, no network, no API keys required.
 
-The feed is public and the endpoint is unauthenticated, so this cap is the
-only thing bounding generation spend.
+The feed is public and the endpoint is unauthenticated, so the daily cap is
+the only thing bounding generation spend, and the sensitive check is the
+only thing stopping e.g. a rape conviction being framed as a "playoff blowout".
 """
 
 from types import SimpleNamespace
@@ -21,13 +22,13 @@ def fake_in_terms(monkeypatch):
     `generated_today` (count toward the cap), `limit`; `generated` records
     calls that reached the model.
     """
-    state = {"cached": None, "generated_today": 0, "limit": 3, "generated": []}
+    state = {"cached": None, "generated_today": 0, "limit": 3, "generated": [], "sensitive": False}
 
     async def fake_get_in_terms(db, article_id, target_category):
         return state["cached"]
 
     async def fake_get_article(db, article_id):
-        return SimpleNamespace(id=article_id, category="NBA")
+        return SimpleNamespace(id=article_id, category="NBA", sensitive=state["sensitive"])
 
     async def fake_count(db, since):
         return state["generated_today"]
@@ -78,3 +79,23 @@ async def test_cached_result_is_served_even_past_the_cap(fake_in_terms):
     fake_in_terms["cached"] = CACHED
 
     assert await in_terms.get_or_generate_in_terms(None, 1, "Reality TV") is CACHED
+
+
+# None = saved before classification existed and not yet backfilled.
+@pytest.mark.parametrize("sensitive", [True, None])
+async def test_sensitive_or_unclassified_story_is_refused(fake_in_terms, sensitive):
+    fake_in_terms["sensitive"] = sensitive
+
+    with pytest.raises(in_terms.SensitiveStory):
+        await in_terms.get_or_generate_in_terms(None, 1, "NFL")
+
+    assert fake_in_terms["generated"] == []
+
+
+async def test_cached_translation_of_sensitive_story_is_not_served(fake_in_terms):
+    # Translations generated before the check existed are already cached.
+    fake_in_terms["sensitive"] = True
+    fake_in_terms["cached"] = CACHED
+
+    with pytest.raises(in_terms.SensitiveStory):
+        await in_terms.get_or_generate_in_terms(None, 1, "NFL")

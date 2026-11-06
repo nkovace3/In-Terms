@@ -17,7 +17,10 @@ async def save_article(db: Session, article: RSSResult, story: FinalStory, dynam
         key_points=story.key_points,
         category=article.category,
         dynamics=dynamics.model_dump(),
-        embedding=embedding
+        embedding=embedding,
+        # getattr: the editor's output is model_construct'ed (unvalidated),
+        # so a missing field must land as None (blocked), not crash.
+        sensitive=getattr(story, "sensitive", None),
     )
 
     db.add(db_article)

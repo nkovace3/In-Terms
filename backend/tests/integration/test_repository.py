@@ -31,6 +31,7 @@ def make_story() -> FinalStory:
         # FinalStory requires 3-5 key points.
         key_points=["Point one", "Point two", "Point three"],
         sources=[],
+        sensitive=False,
     )
 
 
@@ -53,6 +54,7 @@ async def test_save_and_get_article_roundtrip(db_session):
     assert fetched.url == "https://example.com/roundtrip-test"
     assert fetched.headline == "A clearer headline"
     assert fetched.key_points == ["Point one", "Point two", "Point three"]
+    assert fetched.sensitive is False
 
 
 async def test_article_exists_before_and_after_save(db_session):

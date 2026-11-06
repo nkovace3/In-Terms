@@ -137,6 +137,7 @@ async def test_in_terms_generation():
             summary=article.summary,
             key_points=article.key_points,
             sources=[],
+            sensitive=bool(article.sensitive),
         )
 
         dynamics = StoryDynamics(**article.dynamics)

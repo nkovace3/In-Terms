@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, JSON, Text, ForeignKey, UniqueConstraint
+from sqlalchemy import Boolean, String, DateTime, JSON, Text, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
 
@@ -26,6 +26,9 @@ class Article(Base):
     dynamics: Mapped[dict] = mapped_column(JSON, nullable=True)
 
     embedding: Mapped[list[float]] = mapped_column(Vector(768), nullable=True)
+
+    # None = not classified yet; In Terms treats that as sensitive.
+    sensitive: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     in_terms: Mapped[list["InTerms"]] = relationship(back_populates="article", cascade="all, delete-orphan")
 

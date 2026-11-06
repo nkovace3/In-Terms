@@ -3,6 +3,7 @@ import json
 from schemas.research import ResearchResult
 from schemas.outputs import FinalStory
 from services.google import execute_query
+from services.sensitivity import SENSITIVE_DEFINITION
 
 async def edit_story(research: ResearchResult, article_title: str) -> FinalStory:
     prompt = f"""
@@ -62,6 +63,10 @@ async def edit_story(research: ResearchResult, article_title: str) -> FinalStory
         by the research.
         - Do not present opinions as facts.
         - Every factual claim must be supported by the provided research.
+
+        SENSITIVE:
+        After writing the card, classify the story.
+        {SENSITIVE_DEFINITION}
         """
     response = await execute_query(prompt, FinalStory)
     # model_construct, not model_validate_json: the schema's max_length

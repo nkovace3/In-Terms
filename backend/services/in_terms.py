@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 class DailyLimitReached(Exception):
     """Raised on a cache miss once today's generation cap is used up."""
 
+class SensitiveStory(Exception):
+    """Raised for stories that shouldn't be reframed (see services/sensitivity.py)."""
+
 async def generate_in_terms(story: FinalStory, dynamics: StoryDynamics, target_term: str, similar_article, similar_dynamics: StoryDynamics | None) -> InTermsResult:
     # --- PROMPT V2 (kept as a fallback, not currently used — adds rule 8,
     # which tries to force target-domain-specific process vocabulary even
@@ -181,15 +184,21 @@ Return only the structured InTermsResult.
     return InTermsResult.model_construct(**json.loads(response.text))
 
 async def get_or_generate_in_terms(db: Session, article_id: int, target_category: str):
-    cached = await get_in_terms(db=db, article_id=article_id, target_category=target_category)
-
-    if cached:
-        return cached
-
     article = await get_article(db, article_id)
 
     if article is None:
         return None
+
+    # Before the cache lookup, so a translation cached before this check
+    # existed is never served either. `is not False`: unclassified (None)
+    # is blocked too — fail closed.
+    if article.sensitive is not False:
+        raise SensitiveStory()
+
+    cached = await get_in_terms(db=db, article_id=article_id, target_category=target_category)
+
+    if cached:
+        return cached
 
     if target_category == article.category:
         return None

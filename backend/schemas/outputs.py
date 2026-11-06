@@ -10,6 +10,9 @@ class FinalStory(BaseModel):
         min_length=3, max_length=5
     )
     sources: list[Source]
+    # Classified by the editor in the same call (see services/sensitivity.py).
+    # Last, so it's judged after the story is written.
+    sensitive: bool
 
 class ArticleResponse(BaseModel):
     id: int
@@ -22,6 +25,7 @@ class ArticleResponse(BaseModel):
     key_points: list[str]
     created_at: datetime
     category: str
+    sensitive: bool | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

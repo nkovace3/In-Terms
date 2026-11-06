@@ -9,6 +9,8 @@ export interface Article{
     key_points: string[];
     created_at: string;
     category: string;
+    /** null = not classified yet; treated as sensitive (no translating). */
+    sensitive: boolean | null;
 }
 
 export interface InTerms{

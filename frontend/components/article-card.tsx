@@ -111,46 +111,54 @@ export function ArticleCard({ article, personalAccent }: ArticleCardProps) {
             ))}
           </ul>
 
-          <div ref={menuRef} className="relative">
-            {menuOpen && (
-              <div className="absolute inset-x-0 bottom-full z-50 mb-2 max-h-48 overflow-y-auto rounded-xl border border-border bg-popover py-1 shadow-lg">
-                {targets.map((target) => (
-                  <button
-                    key={target}
-                    type="button"
-                    onClick={() => handleTranslate(target)}
-                    className="block w-full cursor-pointer px-4 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted"
-                  >
-                    {target}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <button
-              type="button"
-              data-tour="translate-trigger"
-              onClick={() => setMenuOpen((value) => !value)}
-              disabled={isTranslating}
-              className="relative flex w-full cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl border border-border bg-background py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-1000 ease-out group-hover:translate-x-full dark:via-white/10" />
-              {isTranslating ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Sparkles className="size-4" />
+          {/* The backend refuses these too (403); hiding the button just
+              means readers never hit that. `!== false` fails closed. */}
+          {article.sensitive !== false ? (
+            <p className="rounded-xl border border-border py-2.5 text-center text-xs text-muted-foreground">
+              In Terms is off for sensitive stories.
+            </p>
+          ) : (
+            <div ref={menuRef} className="relative">
+              {menuOpen && (
+                <div className="absolute inset-x-0 bottom-full z-50 mb-2 max-h-48 overflow-y-auto rounded-xl border border-border bg-popover py-1 shadow-lg">
+                  {targets.map((target) => (
+                    <button
+                      key={target}
+                      type="button"
+                      onClick={() => handleTranslate(target)}
+                      className="block w-full cursor-pointer px-4 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted"
+                    >
+                      {target}
+                    </button>
+                  ))}
+                </div>
               )}
-              {isTranslating ? "Translating…" : "Translate"}
-              {!isTranslating && (
-                <ChevronDown
-                  className={cn(
-                    "size-3.5 transition-transform",
-                    menuOpen && "rotate-180"
-                  )}
-                />
-              )}
-            </button>
-          </div>
+  
+              <button
+                type="button"
+                data-tour="translate-trigger"
+                onClick={() => setMenuOpen((value) => !value)}
+                disabled={isTranslating}
+                className="relative flex w-full cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl border border-border bg-background py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                <span className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-1000 ease-out group-hover:translate-x-full dark:via-white/10" />
+                {isTranslating ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Sparkles className="size-4" />
+                )}
+                {isTranslating ? "Translating…" : "Translate"}
+                {!isTranslating && (
+                  <ChevronDown
+                    className={cn(
+                      "size-3.5 transition-transform",
+                      menuOpen && "rotate-180"
+                    )}
+                  />
+                )}
+              </button>
+            </div>
+          )}
 
           {error === "daily-limit" && (
             <p className="text-center text-xs text-muted-foreground">
