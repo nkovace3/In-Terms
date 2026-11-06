@@ -69,6 +69,13 @@ async def get_in_terms(db: Session, article_id: int, target_category: str) -> In
 
     return db.scalars(statement).first()
 
+async def count_in_terms_since(db: Session, since: datetime) -> int:
+    statement = (
+        text("SELECT COUNT(*) FROM in_terms WHERE created_at >= :since")
+        .bindparams(since=since)
+    )
+    return db.scalar(statement)
+
 async def save_in_terms(db: Session, article_id: int, target_category: str, result: InTermsResult) -> InTerms:
     db_in_terms = InTerms(
         article_id=article_id,

@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import UTC, datetime
 
 from config import get_settings
 from services.google import execute_query
@@ -7,9 +8,12 @@ from services.usage import track_usage
 from schemas.outputs import FinalStory, StoryDynamics, InTermsResult
 from models import Article
 from sqlalchemy.orm import Session
-from repository import get_in_terms, get_article, find_similar_articles, save_in_terms
+from repository import get_in_terms, get_article, find_similar_articles, save_in_terms, count_in_terms_since
 
 logger = logging.getLogger(__name__)
+
+class DailyLimitReached(Exception):
+    """Raised on a cache miss once today's generation cap is used up."""
 
 async def generate_in_terms(story: FinalStory, dynamics: StoryDynamics, target_term: str, similar_article, similar_dynamics: StoryDynamics | None) -> InTermsResult:
     # --- PROMPT V2 (kept as a fallback, not currently used — adds rule 8,
@@ -189,6 +193,16 @@ async def get_or_generate_in_terms(db: Session, article_id: int, target_category
 
     if target_category == article.category:
         return None
+
+    # Checked only on a cache miss, so cached translations keep working
+    # after the cap is hit. Not atomic: a few concurrent requests can slip
+    # past the limit, which is fine for a cost ceiling.
+    limit = get_settings().max_in_terms_generations_per_day
+    # Naive UTC, to match how created_at is stored.
+    start_of_day = datetime.now(UTC).replace(tzinfo=None, hour=0, minute=0, second=0, microsecond=0)
+    if await count_in_terms_since(db, start_of_day) >= limit:
+        logger.warning("Daily In Terms cap of %d reached — refusing article %d -> %s", limit, article_id, target_category)
+        raise DailyLimitReached()
 
     # Generated on a cache miss while the user waits, so this latency is
     # directly user-facing — worth logging every time.

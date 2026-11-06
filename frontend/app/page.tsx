@@ -1,17 +1,10 @@
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
 import { ArticleFeed } from "@/components/article-feed";
 
+// Public on purpose: visitors (e.g. someone clicking through from a
+// portfolio link) should land on cards they can flip, not a sign-in wall.
+// Signing in only adds personalization — a favorite category and color.
+// Generation spend is bounded by the backend's daily cap, not by auth.
 export default async function Home(props: PageProps<"/">) {
-  const session = await auth.api.getSession({
-    headers: await headers(),
-  });
-
-  if (!session) {
-    redirect("/login");
-  }
-
   const searchParams = await props.searchParams;
   const showTour = searchParams.tour === "welcome";
 

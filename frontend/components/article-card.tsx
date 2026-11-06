@@ -21,7 +21,7 @@ export function ArticleCard({ article, personalAccent }: ArticleCardProps) {
   const [flipped, setFlipped] = useState(false);
   const [inTerms, setInTerms] = useState<InTerms | null>(null);
   const [isTranslating, setIsTranslating] = useState(false);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<"daily-limit" | "error" | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -51,7 +51,7 @@ export function ArticleCard({ article, personalAccent }: ArticleCardProps) {
   async function handleTranslate(target: string) {
     setMenuOpen(false);
     setIsTranslating(true);
-    setError(false);
+    setError(null);
 
     try {
       // The backend caches each (article, target) translation in the
@@ -59,10 +59,14 @@ export function ArticleCard({ article, personalAccent }: ArticleCardProps) {
       // is already cheap server-side — no need to duplicate that caching
       // on the client.
       const result = await translateArticle(article.id, target);
-      setInTerms(result);
-      setFlipped(true);
+      if (result.ok) {
+        setInTerms(result.inTerms);
+        setFlipped(true);
+      } else {
+        setError(result.reason);
+      }
     } catch {
-      setError(true);
+      setError("error");
     } finally {
       setIsTranslating(false);
     }
@@ -148,7 +152,13 @@ export function ArticleCard({ article, personalAccent }: ArticleCardProps) {
             </button>
           </div>
 
-          {error && (
+          {error === "daily-limit" && (
+            <p className="text-center text-xs text-muted-foreground">
+              Today&apos;s new translations are used up — try one that&apos;s
+              already been translated, or come back tomorrow.
+            </p>
+          )}
+          {error === "error" && (
             <p className="text-center text-xs text-destructive">
               Couldn&apos;t translate that one — try again.
             </p>

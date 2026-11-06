@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from database import SessionLocal
 from repository import get_all_articles, get_article
-from services.in_terms import get_or_generate_in_terms
+from services.in_terms import get_or_generate_in_terms, DailyLimitReached
 
 from schemas.outputs import ArticleResponse, InTermsResponse
 
@@ -54,7 +54,13 @@ async def get_article_in_terms(article_id: int, target_category: str):
     )
 
     try:
-        result = await get_or_generate_in_terms(db=db, article_id=article_id, target_category=target_category)
+        try:
+            result = await get_or_generate_in_terms(db=db, article_id=article_id, target_category=target_category)
+        except DailyLimitReached:
+            raise HTTPException(
+                status_code=429,
+                detail="Daily translation limit reached"
+            )
 
         if result is None:
             raise HTTPException(

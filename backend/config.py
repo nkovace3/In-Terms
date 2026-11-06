@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     # each). Feeds list newest first, so a capped run keeps the freshest.
     max_new_articles_per_feed: int = 2
 
+    # Cost cap: at most this many *new* In Terms generations per UTC day.
+    # The feed is public and the endpoint has no auth, so this is what
+    # bounds spend. Cached translations are always served, cap or not.
+    max_in_terms_generations_per_day: int = 200
+
     # Optional USD rates for cost estimates in the logs. Leave unset and
     # usage is still logged (calls, tokens, time), just without a $ figure.
     llm_input_usd_per_mtok: float | None = None

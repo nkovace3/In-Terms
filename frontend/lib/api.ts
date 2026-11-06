@@ -2,6 +2,12 @@ import type { Article, InTerms } from "./types";
 
 const API_BASE_URL = process.env.API_BASE_URL;
 
+export class ApiError extends Error {
+    constructor(message: string, readonly status: number) {
+        super(message);
+    }
+}
+
 async function fetchFromApi<T>(path: string): Promise<T> {
     if (!API_BASE_URL){
         throw new Error("API_BASE_URL is not confirmed");
@@ -12,8 +18,9 @@ async function fetchFromApi<T>(path: string): Promise<T> {
     });
 
     if(!response.ok){
-        throw new Error(
-            `API request failed: ${response.status} ${response.statusText}`
+        throw new ApiError(
+            `API request failed: ${response.status} ${response.statusText}`,
+            response.status
         );
     }
 

@@ -8,8 +8,8 @@ back afterward, so nothing here touches real data.
 
 from datetime import datetime, timedelta
 
-from repository import article_exists, find_similar_articles, get_article, save_article
-from schemas.outputs import FinalStory, StoryDynamics
+from repository import article_exists, count_in_terms_since, find_similar_articles, get_article, save_article, save_in_terms
+from schemas.outputs import FinalStory, InTermsResult, StoryDynamics
 from schemas.rss import RSSResult
 
 
@@ -132,3 +132,27 @@ async def test_find_similar_articles_excludes_old_articles(db_session):
     )
 
     assert old_article.id not in [article.id for article in results]
+
+
+async def test_count_in_terms_since_counts_new_generations(db_session):
+    # Relative counts, since the dev database may already hold today's rows.
+    since = datetime.utcnow() - timedelta(minutes=1)
+    before = await count_in_terms_since(db_session, since)
+
+    article = await save_article(
+        db=db_session,
+        article=make_article("https://example.com/in-terms-count"),
+        story=make_story(),
+        dynamics=StoryDynamics(situation=["milestone"]),
+        embedding=[0.1] * 768,
+    )
+    await save_in_terms(
+        db=db_session,
+        article_id=article.id,
+        target_category="Reality TV",
+        result=InTermsResult.model_construct(headline="h", summary="s", key_points=["a", "b", "c"]),
+    )
+
+    assert await count_in_terms_since(db_session, since) == before + 1
+    # Rows created before the window don't count.
+    assert await count_in_terms_since(db_session, datetime.utcnow() + timedelta(minutes=1)) == 0

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Sparkles } from "lucide-react";
 import { SignInButton } from "@/components/sign-in-button";
 import { auth } from "@/lib/auth";
@@ -31,6 +32,13 @@ export default async function LogIn() {
           </div>
 
           <SignInButton className="w-full" />
+
+          <Link
+            href="/"
+            className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+          >
+            Or browse the feed without signing in
+          </Link>
         </div>
       </div>
     </div>

@@ -118,12 +118,24 @@ function ProfileMenu() {
     await authClient.signOut({
       fetchOptions: {
         onSuccess: () => {
-          router.push("/login");
+          // The feed is public, so stay on it — just drop personalization.
+          router.push("/");
           router.refresh();
         },
       },
     });
   };
+
+  if (!session) {
+    return (
+      <Link
+        href="/login"
+        className="pointer-events-auto rounded-full border border-border bg-background/80 px-3 py-1.5 text-xs font-medium text-foreground backdrop-blur-sm transition-colors hover:bg-muted"
+      >
+        Sign in
+      </Link>
+    );
+  }
 
   return (
     <div ref={menuRef} className="pointer-events-auto relative">
@@ -139,7 +151,7 @@ function ProfileMenu() {
 
       {open && (
         <div className="absolute top-full right-0 z-50 mt-2 w-56 overflow-hidden rounded-xl border border-border bg-popover py-1 shadow-lg">
-          {session?.user && (
+          {session.user && (
             <div className="border-b border-border px-3 py-2">
               <p className="truncate text-sm font-semibold text-foreground">
                 {session.user.name}
