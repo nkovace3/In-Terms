@@ -8,7 +8,17 @@ from services.usage import record_call
 
 @lru_cache
 def get_client() -> genai.Client:
-    return genai.Client(api_key = get_settings().google_api_key)
+    return genai.Client(
+        api_key = get_settings().google_api_key,
+        # Without retry_options the SDK makes exactly one attempt. A daily run
+        # lost two articles to a momentary 429 on Google's shared regional
+        # capacity (nothing to do with our quota or billing). This retries
+        # 429/5xx/timeouts with exponential backoff: ~2, 4, 8, 16, 32s, so a
+        # busy minute is ridden out before the article counts as failed.
+        http_options = types.HttpOptions(
+            retry_options = types.HttpRetryOptions(attempts = 6, initial_delay = 2.0),
+        ),
+    )
 
 # Both functions use the client's async API (client.aio). The plain
 # client.models.* calls are synchronous, so calling them from these async
