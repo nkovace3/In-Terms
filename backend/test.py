@@ -4,9 +4,8 @@ from database import SessionLocal
 from services.rss import feeds, get_latest_articles
 from services.pipeline import process_article
 from services.dynamics import extract_dynamics, embed_dynamics
-from repository import save_article, article_exists, get_article, find_similar_articles, save_in_terms
-from schemas.outputs import FinalStory, StoryDynamics
-from services.in_terms import generate_in_terms, get_or_generate_in_terms
+from repository import save_article, article_exists, get_article, find_similar_articles
+from services.in_terms import generate_in_terms_for_article, get_or_generate_in_terms
 
 async def end_to_end_with_embedding():
     db = SessionLocal()
@@ -89,7 +88,6 @@ async def test_in_terms_generation():
     db = SessionLocal()
 
     try:
-        # Get the Batum article
         article = await get_article(db, 23)
 
         if article is None:
@@ -99,62 +97,14 @@ async def test_in_terms_generation():
         print("\nOriginal article:")
         print(article.headline)
 
-        # Find the closest Reality TV story
-        similar_articles = await find_similar_articles(
-            db=db,
-            embedding=article.embedding,
-            category="Reality TV",
-            limit=1,
-            # days_back=14,
-        )
+        generation = await generate_in_terms_for_article(db, article, "Reality TV")
 
-        similar_article = similar_articles[0] if similar_articles else None
-
-        print("\nClosest Reality TV article:")
-        if similar_article:
-            print(similar_article.headline)
-        else:
-            print("None found")
-
-        # Extract dynamics from the retrieved story
-        similar_dynamics = None
-
-        if similar_article:
-            similar_dynamics = StoryDynamics(**similar_article.dynamics)
-
-        print("\nOriginal dynamics:")
-        print(article.dynamics)
-
-        print("\nRetrieved story dynamics:")
-        if similar_dynamics:
-            print(similar_dynamics)
-        else:
-            print("None")
-
-        # Reconstruct the original story
-        story = FinalStory(
-            headline=article.headline,
-            summary=article.summary,
-            key_points=article.key_points,
-            sources=[],
-            sensitive=bool(article.sensitive),
-        )
-
-        dynamics = StoryDynamics(**article.dynamics)
-
-        # Generate the In Terms translation
-        result = await generate_in_terms(
-            story=story,
-            dynamics=dynamics,
-            target_term="Reality TV",
-            similar_article=similar_article,
-            similar_dynamics=similar_dynamics,
-        )
-
+        print("\nCandidates:")
+        for candidate in generation.candidates:
+            print(f"  {candidate.id}: {candidate.headline}")
+        print(f"\nParallel: {generation.reference.headline if generation.reference else 'none'}")
         print("\nIn Terms:")
-        print(result)
-
-        await save_in_terms(db=db, article_id=23, target_category='Reality TV', result=result )
+        print(generation.result)
 
     finally:
         db.close()

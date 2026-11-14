@@ -150,8 +150,9 @@ async def export_fresh(db, count: int, seed: int) -> list[dict]:
     items = []
     for i, (article, target) in enumerate(pairs, 1):
         print(f"[{i}/{len(pairs)}] {article.category} -> {target}: {article.headline}")
-        result = await generate_in_terms_for_article(db, article, target)
-        items.append(make_item(article, target, result.model_dump(), origin))
+        generation = await generate_in_terms_for_article(db, article, target)
+        output = {k: getattr(generation.result, k) for k in ("headline", "summary", "key_points")}
+        items.append(make_item(article, target, output, origin))
     return items
 
 
@@ -301,8 +302,10 @@ def cohens_kappa(pairs: list[tuple[bool, bool]]) -> float | None:
     return (observed - expected) / (1 - expected)
 
 
-# The card UI's hard limits, as stated in the In Terms prompt.
-LIMITS = {"headline": 60, "summary": 110, "key_point": 90, "key_point_count": 3}
+# Reasonable ceilings for the card UI (InTermsResult's max_lengths), widened
+# when cards became comparisons of two stories; accuracy beats brevity, so
+# this flags outliers rather than setting a tight budget.
+LIMITS = {"headline": 80, "summary": 200, "key_point": 140, "key_point_count": 3}
 
 
 def format_violations(output: dict) -> list[str]:

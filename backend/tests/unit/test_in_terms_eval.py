@@ -7,8 +7,8 @@ import pytest
 from evals.in_terms_eval import cohens_kappa, format_violations
 
 
-def make_output(headline="h" * 60, summary="s" * 110, key_points=None):
-    return {"headline": headline, "summary": summary, "key_points": key_points or ["k" * 90] * 3}
+def make_output(headline="h" * 80, summary="s" * 200, key_points=None):
+    return {"headline": headline, "summary": summary, "key_points": key_points or ["k" * 140] * 3}
 
 
 def test_output_at_the_limits_passes_format_check():
@@ -17,9 +17,9 @@ def test_output_at_the_limits_passes_format_check():
 
 def test_format_check_flags_each_overlong_field():
     problems = format_violations(
-        make_output(headline="h" * 61, summary="s" * 111, key_points=["k" * 91, "ok", "ok"])
+        make_output(headline="h" * 81, summary="s" * 201, key_points=["k" * 141, "ok", "ok"])
     )
-    assert problems == ["headline 61>60", "summary 111>110", "key point 1 91>90"]
+    assert problems == ["headline 81>80", "summary 201>200", "key point 1 141>140"]
 
 
 def test_format_check_flags_wrong_number_of_key_points():
@@ -54,3 +54,22 @@ def test_kappa_matches_hand_computed_value():
 def test_kappa_undefined_when_empty_or_no_variation():
     assert cohens_kappa([]) is None
     assert cohens_kappa([(True, True), (True, True)]) is None
+
+
+# --- compare_eval: the A/B significance test ---------------------------------
+
+from evals.compare_eval import sign_test
+
+
+def test_sign_test_matches_known_binomial_value():
+    # 15 wins vs 5 losses: two-sided exact p = 0.0414.
+    assert sign_test(15, 5) == pytest.approx(0.0414, abs=1e-4)
+
+
+def test_sign_test_is_symmetric_and_one_when_even():
+    assert sign_test(5, 15) == sign_test(15, 5)
+    assert sign_test(4, 4) == 1.0
+
+
+def test_sign_test_with_no_decisive_pairs_is_undefined():
+    assert sign_test(0, 0) is None

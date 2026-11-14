@@ -73,7 +73,9 @@ async def get_article_in_terms(article_id: int, target_category: str):
                 detail="Article not found"
             )
 
-        return result
+        # Validated here, not by FastAPI after returning: reference_headline
+        # lazy-loads the reference article, which needs the open session.
+        return InTermsResponse.model_validate(result)
 
     finally:
         db.close()

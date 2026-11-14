@@ -37,9 +37,21 @@ class StoryDynamics(BaseModel):
     emotional_dynamics: list[str] = []
 
 class InTermsResult(BaseModel):
-    headline: str = Field(max_length=60)
-    summary: str = Field(max_length=110)
-    key_points: list[Annotated[str, Field(max_length=90)]] = Field(
+    # Reasoning and the pick come before the card fields on purpose, so the
+    # model commits to a parallel (or to none) before writing around it.
+    why_it_matches: str = Field(
+        description="One sentence: the shared structure between the original and the chosen candidate, naming both. Empty if none chosen."
+    )
+    reference_number: int | None = Field(
+        description="Number of the candidate story used as the parallel, or null if none genuinely mirrors the original."
+    )
+    # Looser than the original card's limits: a comparison has to name two
+    # stories, and accuracy comes before brevity. These are "reasonable"
+    # ceilings (not enforced — results are model_construct'ed), flagged by
+    # the eval's format check.
+    headline: str = Field(max_length=80)
+    summary: str = Field(max_length=200)
+    key_points: list[Annotated[str, Field(max_length=140)]] = Field(
         min_length=3, max_length=3
     )
 
@@ -51,5 +63,7 @@ class InTermsResponse(BaseModel):
     summary: str
     key_points: list[str] = Field(min_length=3, max_length=3)
     created_at: datetime
+    # Headline of the real story the card compares against, if any.
+    reference_headline: str | None = None
 
     model_config = ConfigDict(from_attributes=True)

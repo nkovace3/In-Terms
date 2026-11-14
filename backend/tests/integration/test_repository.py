@@ -24,14 +24,14 @@ def make_article(url: str, category: str = "NBA") -> RSSResult:
     )
 
 
-def make_story() -> FinalStory:
+def make_story(sensitive: bool | None = False) -> FinalStory:
     return FinalStory(
         headline="A clearer headline",
         summary="A short summary.",
         # FinalStory requires 3-5 key points.
         key_points=["Point one", "Point two", "Point three"],
         sources=[],
-        sensitive=False,
+        sensitive=sensitive,
     )
 
 
@@ -158,3 +158,47 @@ async def test_count_in_terms_since_counts_new_generations(db_session):
     assert await count_in_terms_since(db_session, since) == before + 1
     # Rows created before the window don't count.
     assert await count_in_terms_since(db_session, datetime.utcnow() + timedelta(minutes=1)) == 0
+
+
+async def test_find_similar_articles_can_exclude_sensitive(db_session):
+    # In Terms compares against these, so a sensitive (or unclassified) story
+    # must never be offered as a parallel.
+    ids = {}
+    for label, sensitive in (("ok", False), ("sensitive", True), ("unclassified", None)):
+        saved = await save_article(
+            db=db_session,
+            article=make_article(f"https://example.com/similar-{label}", category="NBA"),
+            story=make_story(sensitive=sensitive),
+            dynamics=StoryDynamics(situation=["milestone"]),
+            embedding=[1.0] * 768,
+        )
+        ids[label] = saved.id
+
+    results = await find_similar_articles(
+        db=db_session, category="NBA", embedding=[1.0] * 768, limit=1000, exclude_sensitive=True,
+    )
+    result_ids = {article.id for article in results}
+
+    assert ids["ok"] in result_ids
+    assert ids["sensitive"] not in result_ids
+    assert ids["unclassified"] not in result_ids
+
+
+async def test_find_similar_articles_days_back_widens_the_window(db_session):
+    article = await save_article(
+        db=db_session,
+        article=make_article("https://example.com/similar-60-days", category="NBA"),
+        story=make_story(),
+        dynamics=StoryDynamics(situation=["milestone"]),
+        embedding=[1.0] * 768,
+    )
+    article.published_at = datetime.utcnow() - timedelta(days=60)
+    db_session.flush()
+
+    default_window = await find_similar_articles(db=db_session, category="NBA", embedding=[1.0] * 768, limit=1000)
+    wide_window = await find_similar_articles(
+        db=db_session, category="NBA", embedding=[1.0] * 768, limit=1000, days_back=90,
+    )
+
+    assert article.id not in [a.id for a in default_window]
+    assert article.id in [a.id for a in wide_window]

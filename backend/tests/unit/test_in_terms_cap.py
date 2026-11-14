@@ -22,7 +22,10 @@ def fake_in_terms(monkeypatch):
     `generated_today` (count toward the cap), `limit`; `generated` records
     calls that reached the model.
     """
-    state = {"cached": None, "generated_today": 0, "limit": 3, "generated": [], "sensitive": False}
+    state = {
+        "cached": None, "generated_today": 0, "limit": 3, "generated": [], "sensitive": False,
+        "reference": None, "saved_reference_id": None,
+    }
 
     async def fake_get_in_terms(db, article_id, target_category):
         return state["cached"]
@@ -35,9 +38,10 @@ def fake_in_terms(monkeypatch):
 
     async def fake_generate(db, article, target_category):
         state["generated"].append((article.id, target_category))
-        return "result"
+        return in_terms.InTermsGeneration(result="result", reference=state["reference"], candidates=[])
 
-    async def fake_save(db, article_id, target_category, result):
+    async def fake_save(db, article_id, target_category, result, reference_article_id=None):
+        state["saved_reference_id"] = reference_article_id
         return result
 
     class FakeSettings:
@@ -99,3 +103,28 @@ async def test_cached_translation_of_sensitive_story_is_not_served(fake_in_terms
 
     with pytest.raises(in_terms.SensitiveStory):
         await in_terms.get_or_generate_in_terms(None, 1, "NFL")
+
+
+async def test_chosen_parallel_is_saved_with_the_translation(fake_in_terms):
+    fake_in_terms["reference"] = SimpleNamespace(id=42)
+
+    await in_terms.get_or_generate_in_terms(None, 1, "Reality TV")
+
+    assert fake_in_terms["saved_reference_id"] == 42
+
+
+# --- resolve_reference: the model answers with a candidate *number* ----------
+
+CANDIDATES = [SimpleNamespace(id=10), SimpleNamespace(id=20), SimpleNamespace(id=30)]
+
+
+@pytest.mark.parametrize("number, expected_id", [(1, 10), (3, 30)])
+def test_reference_number_is_one_based(number, expected_id):
+    assert in_terms.resolve_reference(number, CANDIDATES, article_id=1).id == expected_id
+
+
+# None = the model found no genuine parallel; 0/4 = it answered out of range,
+# where showing no "Compared with" beats showing the wrong story.
+@pytest.mark.parametrize("number", [None, 0, 4, -1])
+def test_missing_or_out_of_range_reference_is_none(number):
+    assert in_terms.resolve_reference(number, CANDIDATES, article_id=1) is None

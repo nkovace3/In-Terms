@@ -1,16 +1,25 @@
 import json
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from config import get_settings
 from services.google import execute_query
 from services.usage import track_usage
-from schemas.outputs import FinalStory, StoryDynamics, InTermsResult
+from schemas.outputs import InTermsResult
 from models import Article
 from sqlalchemy.orm import Session
 from repository import get_in_terms, get_article, find_similar_articles, save_in_terms, count_in_terms_since
 
 logger = logging.getLogger(__name__)
+
+# How many candidate parallels the model chooses from, and how far back to
+# look for them. Retrieval over the coarse dynamics labels is rough, so the
+# nearest neighbor alone is often only a surface match; giving the model a
+# few to pick from (or reject) is what makes the comparison land. Ingestion
+# adds ~2 articles per category per day, so 14 days was ~28 candidates.
+CANDIDATE_COUNT = 5
+CANDIDATE_DAYS_BACK = 90
 
 class DailyLimitReached(Exception):
     """Raised on a cache miss once today's generation cap is used up."""
@@ -18,170 +27,149 @@ class DailyLimitReached(Exception):
 class SensitiveStory(Exception):
     """Raised for stories that shouldn't be reframed (see services/sensitivity.py)."""
 
-async def generate_in_terms(story: FinalStory, dynamics: StoryDynamics, target_term: str, similar_article, similar_dynamics: StoryDynamics | None) -> InTermsResult:
-    # --- PROMPT V2 (kept as a fallback, not currently used — adds rule 8,
-    # which tries to force target-domain-specific process vocabulary even
-    # when the target domain is structurally similar to the source (e.g.
-    # NBA vs NFL). Tested weaker than expected on that case (the suggested
-    # NBA substitutes didn't fit a sudden-injury story), so we reverted to
-    # V1 below out of caution. If NBA/MLB-style same-domain-family targets
-    # need revisiting, rule 8's idea is still worth trying with better
-    # examples.
-    #
-    # prompt_v2 = f"""
-    # You narrate real news stories using the tone and framing conventions of
-    # another domain, without changing what actually happened.
-    #
-    # CRITICAL DISTINCTION — read this before anything else:
-    #
-    # "In terms of {{target_term}}" does NOT mean rewriting this as a fictional
-    # {{target_term}} story. It does NOT mean renaming the real people, teams, or
-    # organizations with {{target_term}}-style labels (e.g. do not call a team a
-    # "cast," a game an "episode," or a player a "contestant"). Doing that forces
-    # you to invent fake scenes to make the sentence read naturally, which is
-    # exactly what you must not do.
-    #
-    # ... (same as V1 through rule 7) ...
-    #
-    # 8. Watch for cases where {{target_term}} happens to share generic process
-    #    words with the ORIGINAL STORY's own domain (e.g. two sports leagues both
-    #    have "practice," "roster," "inactive," "injured reserve," "depth chart").
-    #    When {{target_term}} has its OWN distinct term for a role, process, or
-    #    structure, use that term instead of defaulting to the original domain's
-    #    word, even though the underlying fact stays the same. Example: if the
-    #    original domain is the NFL and {{target_term}} is the NBA, say "load
-    #    management" or "minutes restriction" instead of reusing "inactive" or
-    #    "injured reserve" verbatim.
-    # """
+@dataclass
+class InTermsGeneration:
+    result: InTermsResult
+    # The candidate the model compared against, or None if it found no
+    # genuine parallel and fell back to plain framing.
+    reference: Article | None
+    candidates: list[Article]
 
-    prompt = f"""
-You narrate real news stories using the tone and framing conventions of
-another domain, without changing what actually happened.
+# Before this, the prompt narrated the original story in the target domain's
+# vocabulary and told the model to use the retrieved story "for tone only —
+# never pull its facts". The retrieval ran but its result never reached the
+# reader, and output read like keyword swapping. The frozen old version is
+# evals/baseline_in_terms.py; evals/compare_eval.py measures one against the other.
+def build_prompt(article: Article, target_term: str, candidates: list[Article]) -> str:
+    story = {"headline": article.headline, "summary": article.summary, "key_points": article.key_points}
+    candidate_blocks = "\n\n".join(
+        f"CANDIDATE {n}\n"
+        + json.dumps(
+            {
+                "headline": c.headline,
+                "summary": c.summary,
+                "key_points": c.key_points,
+                "dynamics": c.dynamics or {},
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+        for n, c in enumerate(candidates, 1)
+    ) or "No candidates are available."
 
-CRITICAL DISTINCTION — read this before anything else:
+    return f"""
+You explain a real news story to someone who follows {target_term}, by
+comparing it to a real {target_term} story. The reader should understand the
+original story better because it works like something they already know.
 
-"In terms of {target_term}" does NOT mean rewriting this as a fictional
-{target_term} story. It does NOT mean renaming the real people, teams, or
-organizations with {target_term}-style labels (e.g. do not call a team a
-"cast," a game an "episode," or a player a "contestant"). Doing that forces
-you to invent fake scenes to make the sentence read naturally, which is
-exactly what you must not do.
+GOOD (an NBA story explained to a politics reader):
+  "The Mavericks sending Luka Dončić to the Lakers for Anthony Davis is like
+  [a real politics story]: two heavyweights each giving up something huge to
+  fix a deal that wasn't working for either side."
+BAD (vocabulary swap, which teaches the reader nothing):
+  "In a stunning cabinet reshuffle, the Mavericks traded their party leader."
 
-Instead, keep every real name, team, and fact exactly as given, and narrate
-them using the STRUCTURE, STAKES, and EMOTIONAL VOCABULARY that {target_term}
-stories are known for. The translation happens in tone and framing, not in
-substituting nouns.
+ORIGINAL STORY (every fact here is real):
+{json.dumps(story, indent=2, ensure_ascii=False)}
 
-The examples below happen to use "Reality TV" as the target domain, purely
-for illustration. The same principle applies no matter what {target_term}
-actually is (NFL, business, MLB, politics, etc.) — find that domain's own
-specific, recognizable tropes and use those instead.
+ORIGINAL STORY DYNAMICS (its abstract shape):
+{json.dumps(article.dynamics or {}, indent=2)}
 
-GOOD EXAMPLE
-Original fact: A team's star receiver is ruled out with an injury before a big game.
-Target domain: Reality TV
-Good: "Jets' Injury Woes at WR Continue as Mitchell Is Ruled Out Against the Lions"
-      "With their receiving corps already thinned out, the Jets lose Mitchell
-      right before a pivotal matchup — the kind of frontrunner-eliminated-
-      before-the-finale twist a season's edit would build a whole episode
-      around."
-Why it works: every fact is real (Mitchell, Jets, Lions, injury). Nothing is
-renamed. The narration uses a SPECIFIC reality-TV trope ("frontrunner
-eliminated before the finale," "the edit would build an episode around it")
-as an explicit comparison — not just generic words like "drama" or
-"setback," which could describe literally any domain and don't actually
-feel like {target_term}.
+CANDIDATE {target_term.upper()} STORIES (real stories, retrieved because their
+dynamics labels resemble the original's; retrieval is rough, so most will
+only share surface labels):
 
-BAD EXAMPLE #1 — fictional relabeling (do not do this)
-Bad: "Injury Drama Leaves Jets Cast Stripped of Key Players... his finger
-      caught in a fellow castmate's jersey during Thursday's rehearsal."
-Why it fails: "cast," "castmate," and "rehearsal" are fictional relabelings,
-and the finger-catching detail is an invented event that never happened.
+{candidate_blocks}
 
-BAD EXAMPLE #2 — generic drama, not actually {target_term} (also do not do this)
-Bad: "In a dramatic escalation of their ongoing roster crisis, the Jets faced
-      the Lions while dealing with a wave of devastating setbacks."
-Why it fails: "dramatic escalation," "crisis," and "devastating setbacks" are
-generic intensity words. Nothing here is specific to {target_term} — this
-exact sentence could be labeled "in terms of a courtroom drama" or "in terms
-of a war documentary" and still make sense. That means the translation
-didn't actually happen; only the volume got turned up.
+STEP 1 — CHOOSE THE PARALLEL (or none)
+First describe the original's situation in one sentence with no names, e.g.
+"a team trades its young star for an older one to win now" or "an employer
+fires someone and the dispute plays out in public". A candidate is a
+parallel only if that SAME sentence describes it without stretching: the
+same kind of move, similar roles (who holds power, who needs whom), similar
+stakes. Sharing a topic, a mood ("high stakes", "under pressure"), or a
+label is not enough. Usually one candidate fits at best, and often none do.
+- why_it_matches: "Shape: <the nameless sentence>. Candidate <n> fits
+  because <reason>." Or, if none fits, "Shape: <sentence>. None fit."
+- reference_number: that candidate's number, or null if none fits.
+A forced comparison is worse than none: a reader who knows the parallel
+will see straight through it.
 
-YOUR INPUTS:
+STEP 2 — WRITE THE CARD
+With a parallel:
+- headline: the original's real event, plainly.
+- summary: "<original event> is like <parallel event>: <the shared shape>."
+- key_points, exactly 3:
+  1. What happened in the original (its own facts).
+  2. What happened in the parallel (its own facts).
+  3. What the two share, or the one way they differ that matters.
+  Only the overall shape has to match. Do NOT pair up individual details
+  (a score with a ratings number, a fan with an ally): that is where
+  comparisons turn into nonsense and invented facts.
+Without a parallel:
+- Narrate the original's real facts with one specific, recognizable
+  {target_term} convention used as an explicit comparison, in the same
+  fields. Generic words like "drama" or "crisis" don't count.
 
-ORIGINAL STORY (source of truth — every fact below is real and must not change):
-{story.model_dump_json(indent=2)}
+It's a phone-sized card, so keep each field to one idea: a headline of a
+few words, a one-sentence summary, and short key points. Accuracy matters
+more than brevity: never cut a qualifier if that makes a claim untrue.
 
-ORIGINAL STORY DYNAMICS (the abstract shape of the situation — use this as
-your primary guide for which framing/vocabulary fits, more so than the literal
-words of the story):
-{dynamics.model_dump_json(indent=2)}
+FACT RULES
+1. Facts about the original come only from ORIGINAL STORY. Facts about the
+   parallel come only from the chosen candidate. Use real names from both.
+2. Never move facts between the stories: no event, number, or person from
+   one may be attributed to the other.
+3. Never relabel real people or organizations as {target_term} roles (don't
+   call a team a "cast" or a GM "the Speaker"). It's a comparison ("like",
+   "mirrors", "the same move as"), not a story set in the other world.
+4. Don't invent details to sharpen the comparison.
+5. No forced slang, memes, or emojis.
 
-TARGET DOMAIN: {target_term}
-
-REFERENCE EXAMPLE FROM THE TARGET DOMAIN (for tone/vocabulary calibration
-only — never pull its facts, names, or specifics into your answer):
-{f"""Headline: {similar_article.headline}
-Summary: {similar_article.summary}
-Key Points: {similar_article.key_points}"""
-if similar_article else
-"No example is available. Rely on general knowledge of the target domain's tone and conventions."}
-
-REFERENCE DYNAMICS (why that example was chosen as structurally similar):
-{similar_dynamics.model_dump_json(indent=2) if similar_dynamics else "NO MATCH AVAILABLE"}
-
-HOW TO WRITE THE OUTPUT:
-
-1. Find the structural match between ORIGINAL STORY DYNAMICS and what
-   {target_term} stories are typically about (setbacks, rivalries, power
-   shifts, reversals, etc).
-2. Narrate the ORIGINAL STORY's real facts using {target_term}'s dramatic
-   register, pacing, and emotional vocabulary — the way a writer who covers
-   {target_term} would describe tension, stakes, or a setback.
-3. Keep every person, team, organization, and factual detail exactly as in
-   the ORIGINAL STORY. Do not rename, relabel, or recast any of them as
-   {target_term}-style equivalents.
-4. Do not invent any event, action, cause, or detail that is not already in
-   the ORIGINAL STORY or ORIGINAL STORY DYNAMICS.
-5. Name at least one SPECIFIC trope, beat, or convention that {target_term}
-   is actually known for (e.g. for reality TV: elimination, the confessional,
-   an alliance, a frontrunner's edit, a villain edit, a season twist — not
-   just "drama"), and use it as an explicit comparison to the real event.
-   A generic intensity word like "crisis," "drama," or "setback" is not
-   enough on its own — if your sentence would still make sense after
-   swapping {target_term} for an unrelated domain, it hasn't translated
-   anything yet. This applies to the headline, summary, AND every key
-   point — don't front-load the {target_term} framing into the headline
-   and then let the key points drift back into flat, undifferentiated
-   reporting.
-6. If the dynamics don't support a specific, vivid comparison, use a more
-   general framing rather than inventing specifics to make it punchier.
-7. Avoid forced slang, memes, emojis, and gimmicks — the goal is a natural
-   tonal shift, not a costume.
-
-OUTPUT FORMAT — return an InTermsResult. This is a short-form card, not an
-article — every field has a hard character limit, so write tightly from the
-start rather than composing a longer version and trimming it:
-
-- headline: The real event, framed with {target_term}'s dramatic conventions.
-  No invented or relabeled entities. Maximum 60 characters.
-- summary: One sentence narrating the real event in that register, including
-  at least one specific, named {target_term} trope used as a comparison.
-  Maximum 110 characters.
-- key_points: Exactly three bullet points, each grounded in a real fact from
-  the ORIGINAL STORY, each framed through the same lens. Maximum 90
-  characters each.
-
-Before answering, check every sentence against the ORIGINAL STORY: if a
-name, event, or detail isn't there, remove it.
-
-Return only the structured InTermsResult.
+Before answering, check each sentence: every fact must be in the story it's
+attributed to.
 """
 
-    response = await execute_query(prompt, InTermsResult)
+async def generate_in_terms_for_article(db: Session, article: Article, target_category: str) -> InTermsGeneration:
+    """
+    Retrieve candidate parallels and generate one In Terms result. No cache
+    lookup and no save — get_or_generate_in_terms handles those for the API;
+    the evals call this directly to score fresh output from the current prompt.
+    """
+    candidates = await find_similar_articles(
+        db=db,
+        embedding=article.embedding,
+        category=target_category,
+        limit=CANDIDATE_COUNT,
+        days_back=CANDIDATE_DAYS_BACK,
+        exclude_sensitive=True,
+    )
+
+    if not candidates:
+        # If ingestion stalls long enough, every generation silently loses
+        # its parallel and falls back to plain framing.
+        logger.warning("No candidate parallels in %s for article %d", target_category, article.id)
+
+    response = await execute_query(build_prompt(article, target_category, candidates), InTermsResult)
     # model_construct, not model_validate_json — see the matching comment
     # in services/editor.py for why.
-    return InTermsResult.model_construct(**json.loads(response.text))
+    result = InTermsResult.model_construct(**json.loads(response.text))
+
+    return InTermsGeneration(
+        result=result,
+        reference=resolve_reference(result.reference_number, candidates, article.id),
+        candidates=candidates,
+    )
+
+def resolve_reference(reference_number: int | None, candidates: list[Article], article_id: int) -> Article | None:
+    if reference_number is None:
+        return None
+    if 1 <= reference_number <= len(candidates):
+        return candidates[reference_number - 1]
+    # The card text may still lean on a parallel, but we can't say which;
+    # better to show no "Compared with" than the wrong one.
+    logger.warning("Article %d: reference_number %s out of range (%d candidates)", article_id, reference_number, len(candidates))
+    return None
 
 async def get_or_generate_in_terms(db: Session, article_id: int, target_category: str):
     article = await get_article(db, article_id)
@@ -216,11 +204,12 @@ async def get_or_generate_in_terms(db: Session, article_id: int, target_category
     # Generated on a cache miss while the user waits, so this latency is
     # directly user-facing — worth logging every time.
     with track_usage() as usage:
-        result = await generate_in_terms_for_article(db, article, target_category)
+        generation = await generate_in_terms_for_article(db, article, target_category)
     logger.info(
-        "Generated In Terms for article %d -> %s [%s]",
+        "Generated In Terms for article %d -> %s (parallel: %s) [%s]",
         article_id,
         target_category,
+        generation.reference.id if generation.reference else "none",
         usage.summary(get_settings().pricing()),
     )
 
@@ -228,62 +217,8 @@ async def get_or_generate_in_terms(db: Session, article_id: int, target_category
         db=db,
         article_id=article_id,
         target_category=target_category,
-        result=result
+        result=generation.result,
+        reference_article_id=generation.reference.id if generation.reference else None,
     )
 
     return saved
-
-async def generate_in_terms_for_article(db: Session, article: Article, target_category: str) -> InTermsResult:
-    """
-    Build the prompt inputs for one article and generate its In Terms
-    result. No cache lookup and no save — get_or_generate_in_terms handles
-    those for the API; the eval script calls this directly to score fresh
-    output from the current prompt.
-    """
-    similar_articles = await find_similar_articles(
-        db=db,
-        embedding=article.embedding,
-        category=target_category,
-        limit=1
-    )
-
-    similar_article = similar_articles[0] if similar_articles else None
-
-    similar_dynamics = None
-
-    if similar_article:
-        # Legacy articles predating dynamics extraction have dynamics=None —
-        # fall back to empty dynamics rather than crashing on **None.
-        similar_dynamics = StoryDynamics(**(similar_article.dynamics or {}))
-
-    # model_construct (not the normal constructor) deliberately skips
-    # validation here. This is already-persisted article content being
-    # repackaged for prompt context, not a fresh LLM result — it was
-    # validated once when it was first generated and saved, and older rows
-    # may predate FinalStory's current max_length limits.
-    story = FinalStory.model_construct(
-                headline=article.headline,
-                summary=article.summary,
-                key_points=article.key_points,
-                sources=[],
-            )
-
-    # Same legacy-data fallback as similar_dynamics above.
-    dynamics = StoryDynamics(**(article.dynamics or {}))
-
-    if similar_article is None:
-        # find_similar_articles only looks back 14 days, so if ingestion
-        # stalls, every generation silently loses its reference example.
-        logger.warning(
-            "No reference example in %s for article %d — generating without one",
-            target_category,
-            article.id,
-        )
-
-    return await generate_in_terms(
-                story=story,
-                dynamics=dynamics,
-                target_term=target_category,
-                similar_article=similar_article,
-                similar_dynamics=similar_dynamics,
-            )

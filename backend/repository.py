@@ -53,11 +53,21 @@ async def article_exists(db: Session, check_url: str) -> bool:
     )   
     return db.scalar(statement) is not None
 
-async def find_similar_articles(db: Session, category: str, embedding: list[float], limit: int = 5) -> list[Article]:
-    time_cutoff = datetime.utcnow() - timedelta(days=14)
+async def find_similar_articles(
+    db: Session,
+    category: str,
+    embedding: list[float],
+    limit: int = 5,
+    days_back: int = 14,
+    exclude_sensitive: bool = False,
+) -> list[Article]:
+    time_cutoff = datetime.utcnow() - timedelta(days=days_back)
+    # exclude_sensitive: In Terms compares against these, and a trade story
+    # shouldn't be likened to a shooting. IS FALSE also drops unclassified rows.
+    sensitive_filter = "AND sensitive IS FALSE " if exclude_sensitive else ""
     statement = (
         select(Article)
-        .from_statement(text("SELECT * FROM articles WHERE embedding IS NOT NULL AND category = :category AND published_at >= :time_cutoff ORDER BY embedding <=> CAST(:embedding AS vector) LIMIT :limit"))
+        .from_statement(text(f"SELECT * FROM articles WHERE embedding IS NOT NULL AND category = :category AND published_at >= :time_cutoff {sensitive_filter}ORDER BY embedding <=> CAST(:embedding AS vector) LIMIT :limit"))
         .params(embedding=embedding, category=category, time_cutoff=time_cutoff, limit=limit)
         )
 
@@ -79,13 +89,20 @@ async def count_in_terms_since(db: Session, since: datetime) -> int:
     )
     return db.scalar(statement)
 
-async def save_in_terms(db: Session, article_id: int, target_category: str, result: InTermsResult) -> InTerms:
+async def save_in_terms(
+    db: Session,
+    article_id: int,
+    target_category: str,
+    result: InTermsResult,
+    reference_article_id: int | None = None,
+) -> InTerms:
     db_in_terms = InTerms(
         article_id=article_id,
         target_category=target_category,
         headline=result.headline,
         summary=result.summary,
         key_points=result.key_points,
+        reference_article_id=reference_article_id,
     )
 
     db.add(db_in_terms)
