@@ -10,7 +10,7 @@ import { CATEGORIES as BASE_CATEGORIES } from "@/lib/categories";
 
 const CATEGORIES = ["All", ...BASE_CATEGORIES];
 
-const DEFAULT_COLOR = "#c026d3";
+const DEFAULT_COLOR = "#fcd600";
 
 export interface OnboardingPreferencesProps {
   /**

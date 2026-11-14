@@ -21,4 +21,6 @@ export interface InTerms{
     summary: string;
     key_points: string[];
     created_at: string;
+    /** Headline of the real story this card compares against; null if none fit. */
+    reference_headline: string | null;
 }

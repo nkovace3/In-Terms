@@ -216,6 +216,12 @@ export function ArticleCard({ article, personalAccent }: ArticleCardProps) {
                   </li>
                 ))}
               </ul>
+
+              {inTerms.reference_headline && (
+                <p className="text-xs text-muted-foreground">
+                  Compared with: {inTerms.reference_headline}
+                </p>
+              )}
             </>
           )}
 
