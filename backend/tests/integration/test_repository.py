@@ -24,7 +24,7 @@ def make_article(url: str, category: str = "NBA") -> RSSResult:
     )
 
 
-def make_story(sensitive: bool | None = False) -> FinalStory:
+def make_story(sensitive: bool = False) -> FinalStory:
     return FinalStory(
         headline="A clearer headline",
         summary="A short summary.",
@@ -168,10 +168,15 @@ async def test_find_similar_articles_can_exclude_sensitive(db_session):
         saved = await save_article(
             db=db_session,
             article=make_article(f"https://example.com/similar-{label}", category="NBA"),
-            story=make_story(sensitive=sensitive),
+            story=make_story(sensitive=bool(sensitive)),
             dynamics=StoryDynamics(situation=["milestone"]),
             embedding=[1.0] * 768,
         )
+        # FinalStory.sensitive is a strict bool (new stories are always
+        # classified); NULL only exists on rows saved before classification,
+        # so set it on the row directly.
+        saved.sensitive = sensitive
+        db_session.flush()
         ids[label] = saved.id
 
     results = await find_similar_articles(
