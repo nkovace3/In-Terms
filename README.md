@@ -1,10 +1,24 @@
-﻿# In Terms
+# In Terms
 
 **News explained in the language of what you already follow.** In Terms is a
 swipeable news feed where any story can be retold "in terms of" a domain you
 care about — a Senate vote framed the way an NBA writer would cover it, an
 NFL injury framed like a reality-TV elimination — without changing a single
 fact.
+
+**[Live app](https://in-terms.vercel.app) · [2-min demo](LOOM_LINK)**
+
+<!-- Record a ~5s GIF of hitting Translate on a card and save it here -->
+![In Terms demo](docs/demo.gif)
+
+**Results at a glance**
+
+- The rebuilt generator beat v1 **30–6 in blind human review** on 40 held-out
+  articles (p < 0.001, sign test).
+- LLM-judged on the same set: cards that were mostly a vocabulary swap fell
+  from 90% → 2%, and fact faithfulness rose from 60% → 85%.
+- Runs in production for **≈ $0.06 per article** and single-digit dollars a
+  month, with a daily spend cap and a fail-closed sensitive-story filter.
 
 ## How it works
 
@@ -24,7 +38,7 @@ flowchart LR
     Emb --> DB[(Postgres + pgvector)]
     DB --> API[FastAPI]
     API --> UI[Next.js feed]
-    UI -->|flip card| IT[In Terms generation<br/>on demand, cached]
+    UI -->|Translate| IT[In Terms generation<br/>on demand, cached]
     IT -->|nearest-neighbor<br/>reference story| DB
 ```
 
@@ -37,7 +51,7 @@ flowchart LR
 3. **Dynamics.** Each story is classified into an abstract "shape" — power
    shifts, setbacks, rivalries, emotional beats — and that classification is
    embedded.
-4. **In Terms.** When a reader flips a card, the backend retrieves the 5
+4. **In Terms.** When a reader hits Translate, the backend retrieves the 5
    most structurally similar stories *in the target domain* from the last 90
    days (pgvector cosine distance over dynamics embeddings, sensitive stories
    excluded). The model picks the one that genuinely mirrors the original, or
@@ -62,6 +76,114 @@ flowchart LR
   dynamics labels is rough: in evals the model picked something other than
   the nearest neighbor about half the time, and declined to compare at all
   when nothing fit, because a forced comparison is worse than none.
+
+## Evaluation
+
+The product's promise — *reframe without changing facts* — is measured, not
+assumed.
+
+### Comparison vs. keyword swap (A/B)
+
+The first version of In Terms used the retrieved story only "for tone", and
+in practice it swapped target-domain vocabulary into the original ("the
+Warriors' *legislative package*"). `evals/compare_eval.py` A/B tests the
+current generator against a frozen copy of that one
+(`evals/baseline_in_terms.py`) on the same articles, at the same time. The
+judge compares the two cards blind in both orders, since LLM judges favor
+whichever they read first, and a win counts only if it's order-consistent.
+The prompt was tuned on a 40-item dev set. The numbers below are from a
+**held-out** set of 40 articles that weren't in the dev set:
+
+| | Old (tone only) | New (comparison) | p |
+|---|---|---|---|
+| **Human head-to-head (blind)** | 6 wins | **30 wins** (4 ties) | <0.001 (sign test) |
+| Judge head-to-head | 2 wins | **36 wins** (2 ties) | <0.001 (sign test) |
+| Faithful (LLM judge) | 60% | **85%** | 0.05 (McNemar) |
+| Mostly a vocabulary swap (LLM judge) | 90% | **2%** | <0.001 |
+| Names a real parallel (LLM judge) | 0% | 52% (abstains otherwise) | <0.001 |
+| Parallel genuinely holds (LLM judge) | 0% | 8% | 0.25 |
+
+I labeled the held-out pairs blind myself, and the judge agreed with my
+pick on 28/40.
+
+What this showed:
+
+- **The comparison format clearly beats vocabulary swapping,** and it's more
+  faithful, because comparing ("is like") doesn't tempt the model to relabel
+  real entities.
+- **The bottleneck is now the corpus, not the prompt.** The judge rates most
+  chosen parallels as loose (Red Sox pitching depth ≈ a venue company's
+  expansion). Showing the model 20 candidates instead of 5 didn't help (10%
+  hold, dev set), so better ranking isn't the fix: with ~40 stories per
+  category, a true structural twin often doesn't exist yet. It should improve
+  as ingestion accumulates stories.
+- **When no stored story fits, the fallback holds up.** The model compares
+  to a familiar *kind* of event instead ("a temporary $15k/month payout is
+  like a government stopgap funding bill"). In blind labeling I preferred
+  the new card 15–2 in those cases, the same as when it used a stored
+  story (15–4). Most of the new version's losses were stored parallels
+  that were a stretch (a hamstring return ≈ voters reaching flooded polls).
+
+### Single-output checks
+
+`evals/in_terms_eval.py` scores individual In Terms cards on:
+
+- **Format** (code-checked): card length limits.
+- **Faithful** (LLM judge + human labels): no invented, changed, or
+  relabeled facts or entities.
+- **Domain-specific** (LLM judge + human labels): uses a named trope of the
+  target domain, not generic "drama".
+
+The judge (`gemini-3.8-flash`) is deliberately a stronger, pinned model than
+the generator. Judge scores are directional until it's calibrated against
+hand labels: early spot checks suggested the single "faithful" criterion
+conflates *are the facts correct?* with *are real entities renamed into
+target-domain terms?*, so it's being split into two criteria first.
+
+Failure patterns these checks surfaced:
+
+- **The dominant failure is relabeling** — stating a target-domain term as
+  fact ("a five-year *max extension*" for a corporate contract; "no relief"
+  for "little relief"), exactly the failure the prompt forbids.
+- **Technical-vocabulary domains fail most.** Finance/Business/Politics
+  targets substitute jargon for real figures ("37.4% offensive *liquidity*
+  rate").
+- **Upstream contamination.** One source story contained an unrelated fact
+  pulled from a search result, so the base editor needs a faithfulness check
+  too.
+
+## Reliability
+
+- Sensitive stories (sexual violence, abuse, death, war, terrorism, suicide,
+  addiction, violent crime) can't be translated. Before this existed, a
+  sexual-assault conviction was framed as an NFL "playoff blowout" and a
+  planned military strike as an MLB "opening series". The editor classifies
+  each story in the same call that writes it, so it costs no extra LLM call.
+  An LLM rather than a keyword list, because keywords flagged "Warriors" and
+  "strikeouts" but missed "Milania Giudice under professional care".
+  Unclassified stories are blocked, i.e. it fails closed.
+- An article whose research doesn't cover the story is deferred, not saved:
+  the synthesizer flags evidence that's empty or off-topic (`on_topic`), and
+  the editor is never called. This came from production: a story ingested
+  ~2h after publishing found no coverage yet and became a "No Information
+  Available" card, and another became a card about the publisher's website.
+  Deferred articles retry on the next run and count toward the cost cap.
+- The feed is public (sign-in only adds personalization), so anyone can
+  trigger In Terms generation. Spend is bounded by a daily cap on *new*
+  generations (`MAX_IN_TERMS_GENERATIONS_PER_DAY`, default 200): cached
+  translations are always served, and past the cap a cache miss returns 429
+  instead of calling the model. Worst-case daily spend is the cap times the
+  per-generation cost, whoever is calling.
+- Malformed feed entries are skipped and logged, a failing feed doesn't stop
+  the others, and a failed article rolls back its DB session so the rest of
+  the run continues.
+- A feed whose newest entry is >72h old logs a stale-feed warning. (The
+  original WSJ business feed had stopped publishing in January 2025 and
+  nothing flagged it until this check existed.)
+- In Terms logs a warning when no reference story exists in the similarity
+  window.
+- All model calls use the async client, so one slow generation doesn't block
+  other API requests.
 
 ## Measured cost and latency
 
@@ -92,134 +214,6 @@ Where it goes, and what that suggests:
 Every LLM/search call is metered (`services/usage.py`), so each ingested
 article and each In Terms generation logs its own calls, tokens, latency, and
 cost.
-
-## Evaluation
-
-The product's promise — *reframe without changing facts* — is measured, not
-assumed. `evals/in_terms_eval.py` scores In Terms output on:
-
-- **Format** (code-checked): card length limits.
-- **Faithful** (LLM judge + human labels): no invented, changed, or
-  relabeled facts or entities.
-- **Domain-specific** (LLM judge + human labels): uses a named trope of the
-  target domain, not generic "drama".
-
-The judge (`gemini-3.8-flash`) is deliberately a stronger, pinned model than
-the generator, and is validated against hand labels with Cohen's kappa before
-its numbers are trusted.
-
-**Judge calibration.** Comparing the judge against hand labels (38 items,
-then a 12-item recheck of disagreements) showed near-chance agreement on
-faithfulness (κ ≈ 0.1). The disagreements weren't random: 6 of 7 were
-*relabeling* cases (a White House briefing room called "the diamond",
-teammates called "his caucus"), which the judge failed and the human labels
-accepted as framing. The single "faithful" criterion was conflating two
-different questions — *are the facts correct?* and *are real entities
-renamed into target-domain terms?* — so the next step is splitting it into
-two criteria and re-calibrating. Until then, judge numbers below are
-directional, not validated.
-
-**Current prompt, n=20 fresh outputs (judge scores, pre-calibration):**
-
-| | Pass |
-|---|---|
-| Format within limits | 50% (all misses are within ~25 chars) |
-| Faithful (judge) | 35% |
-| Domain-specific (judge) | 90% |
-
-What this surfaced:
-
-- **The dominant failure is relabeling** — stating a target-domain term as
-  fact ("a five-year *max extension*" for a corporate contract; "no relief"
-  for "little relief"), exactly the failure the prompt forbids. The prompt
-  pushes hard for specific tropes; the hypothesis is that it over-optimizes
-  for them at the expense of faithfulness.
-- **Technical-vocabulary domains fail most.** Finance/Business/Politics
-  targets substitute jargon for real figures ("37.4% offensive *liquidity*
-  rate").
-- **Upstream contamination.** One source story contained an unrelated fact
-  pulled from a search result, so the base editor needs a faithfulness check
-  too.
-- **Domain-specific at 90%+ doesn't discriminate** and needs a stricter
-  definition.
-
-### Comparison vs. keyword swap (A/B)
-
-The first version of In Terms used the retrieved story only "for tone", and
-in practice it swapped target-domain vocabulary into the original ("the
-Warriors' *legislative package*"). `evals/compare_eval.py` A/B tests the
-current generator against a frozen copy of that one
-(`evals/baseline_in_terms.py`) on the same articles, at the same time. The
-judge compares the two cards blind in both orders, since LLM judges favor
-whichever they read first, and a win counts only if it's order-consistent.
-The prompt was tuned on a 40-item dev set. The numbers below are from a
-**held-out** set of 40 articles that weren't in the dev set:
-
-| | Old (tone only) | New (comparison) | p |
-|---|---|---|---|
-| **Human head-to-head (blind)** | 6 wins | **30 wins** (4 ties) | <0.001 (sign test) |
-| Judge head-to-head | 2 wins | **36 wins** (2 ties) | <0.001 (sign test) |
-| Faithful (judge) | 60% | **85%** | 0.05 (McNemar) |
-| Mostly a vocabulary swap | 90% | **2%** | <0.001 |
-| Names a real parallel | 0% | 52% (abstains otherwise) | <0.001 |
-| Parallel genuinely holds | 0% | 8% | 0.25 |
-
-I labeled the held-out pairs blind myself, and the judge agreed with my
-pick on 28/40.
-
-What this showed:
-
-- **The comparison format clearly beats vocabulary swapping,** and it's more
-  faithful, because comparing ("is like") doesn't tempt the model to relabel
-  real entities.
-- **The bottleneck is now the corpus, not the prompt.** The judge rates most
-  chosen parallels as loose (Red Sox pitching depth ≈ a venue company's
-  expansion). Showing the model 20 candidates instead of 5 didn't help (10%
-  hold, dev set), so better ranking isn't the fix: with ~40 stories per
-  category, a true structural twin often doesn't exist yet. It should improve
-  as ingestion accumulates stories.
-- **When no stored story fits, the fallback holds up.** The model compares
-  to a familiar *kind* of event instead ("a temporary $15k/month payout is
-  like a government stopgap funding bill"). In blind labeling I preferred
-  the new card 15–2 in those cases, the same as when it used a stored
-  story (15–4). Most of the new version's losses were stored parallels
-  that were a stretch (a hamstring return ≈ voters reaching flooded polls).
-- The judge's own calibration caveat (above) applies: `compare_eval.py label`
-  collects blind human preferences for the same pairs, and `report` shows
-  judge–human agreement.
-
-## Reliability
-
-- Malformed feed entries are skipped and logged, a failing feed doesn't stop
-  the others, and a failed article rolls back its DB session so the rest of
-  the run continues.
-- A feed whose newest entry is >72h old logs a stale-feed warning. (The
-  original WSJ business feed had stopped publishing in January 2025 and
-  nothing flagged it until this check existed.)
-- An article whose research doesn't cover the story is deferred, not saved:
-  the synthesizer flags evidence that's empty or off-topic (`on_topic`), and
-  the editor is never called. This came from production: a story ingested
-  ~2h after publishing found no coverage yet and became a "No Information
-  Available" card, and another became a card about the publisher's website.
-  Deferred articles retry on the next run and count toward the cost cap.
-- Sensitive stories (sexual violence, abuse, death, war, terrorism, suicide,
-  addiction, violent crime) can't be translated. Before this existed, a sexual assault
-  conviction was framed as an NFL "playoff blowout" and a planned military
-  strike as an MLB "opening series". The editor classifies each story in the
-  same call that writes it, so it costs no extra LLM call. An LLM rather than
-  a keyword list, because keywords flagged "Warriors" and "strikeouts" but
-  missed "Milania Giudice under professional care".
-  Unclassified stories are blocked, i.e. it fails closed.
-- In Terms logs a warning when no reference story exists in the 14-day
-  similarity window.
-- All model calls use the async client, so one slow generation doesn't block
-  other API requests.
-- The feed is public (sign-in only adds personalization), so anyone can
-  trigger In Terms generation. Spend is bounded by a daily cap on *new*
-  generations (`MAX_IN_TERMS_GENERATIONS_PER_DAY`, default 200): cached
-  translations are always served, and past the cap a cache miss returns 429
-  instead of calling the model. Worst-case daily spend is the cap times the
-  per-generation cost, whoever is calling.
 
 ## Deployment
 
@@ -277,6 +271,7 @@ Measurement and evals (these make real API calls):
 ```bash
 cd backend
 uv run python -m scripts.measure_pipeline --count 3
+uv run python -m evals.compare_eval  ...   # A/B vs. baseline; `label` and `report` subcommands
 uv run python -m evals.in_terms_eval export --fresh 20 --out evals/data/run.jsonl
 uv run python -m evals.in_terms_eval label  evals/data/run.jsonl
 uv run python -m evals.in_terms_eval judge  evals/data/run.jsonl
@@ -289,6 +284,9 @@ uv run python -m evals.in_terms_eval report evals/data/run.jsonl
   ~40 stories per category. More stories per feed, or embedding a free-text
   "shape" sentence instead of the labels, are the next levers, and
   `compare_eval.py` is the check.
+- **Calibrate the judge.** Split "faithful" into *facts correct* and *no
+  relabeled entities*, then validate each against hand labels before
+  trusting single-output judge scores.
 - Enforce card length limits in code (truncate or retry) instead of relying
   on the prompt.
 - Cut research cost: a stricter stop condition and incremental evidence in
