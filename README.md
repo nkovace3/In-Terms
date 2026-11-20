@@ -9,7 +9,7 @@ fact.
 **[Live app](https://in-terms.vercel.app) · [2-min demo](LOOM_LINK)**
 
 <!-- Record a ~5s GIF of hitting Translate on a card and save it here -->
-![In Terms demo](docs/demo.gif)
+![In Terms demo](demo.gif)
 
 **Results at a glance**
 
