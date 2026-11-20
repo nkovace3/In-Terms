@@ -7,10 +7,9 @@ import { FieldDescription, FieldLegend, FieldSet } from "@/components/ui/field";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { authClient } from "@/lib/auth-client";
 import { CATEGORIES as BASE_CATEGORIES } from "@/lib/categories";
+import { DEFAULT_PERSONAL_COLOR } from "@/lib/colors";
 
 const CATEGORIES = ["All", ...BASE_CATEGORIES];
-
-const DEFAULT_COLOR = "#fcd600";
 
 export interface OnboardingPreferencesProps {
   /**
@@ -33,7 +32,7 @@ export function OnboardingPreferences({
     initialCategory ? [initialCategory] : []
   );
   const [personalColor, setPersonalColor] = useState(
-    initialColor || DEFAULT_COLOR
+    initialColor || DEFAULT_PERSONAL_COLOR
   );
 
   const handleUserCustomization = async () => {
