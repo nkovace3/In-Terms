@@ -203,7 +203,7 @@ What this showed:
   Available" card, and another became a card about the publisher's website.
   Deferred articles retry on the next run and count toward the cost cap.
 - Sensitive stories (sexual violence, abuse, death, war, terrorism, suicide,
-  addiction, violent crime) can't be translated. Before this existed, a rape
+  addiction, violent crime) can't be translated. Before this existed, a sexual assault
   conviction was framed as an NFL "playoff blowout" and a planned military
   strike as an MLB "opening series". The editor classifies each story in the
   same call that writes it, so it costs no extra LLM call. An LLM rather than
