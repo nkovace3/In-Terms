@@ -6,7 +6,7 @@ care about — a Senate vote framed the way an NBA writer would cover it, an
 NFL injury framed like a reality-TV elimination — without changing a single
 fact.
 
-**[Live app](https://in-terms.vercel.app) · [2-min demo](LOOM_LINK)**
+**[Live app](https://in-terms.vercel.app) · [2-min demo](https://www.loom.com/share/5f23408273384ddd8025a7b93cda3b9d)**
 
 <!-- Record a ~5s GIF of hitting Translate on a card and save it here -->
 ![In Terms demo](demo.gif)
